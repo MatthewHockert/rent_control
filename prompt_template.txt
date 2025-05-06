@@ -5,6 +5,8 @@ Exceptions: "{Exceptions}"
 
 Based on this information, please answer:
 1. What is the maximum allowed rent increase (numeric or CPI-tied)?
+    - Treat "0.05" as 5%.
+    - The lower the allowed increase, the more restrictive the policy.
 2. Are single-family or small multifamily homes exempt?
 3. Is rent increase tied to inflation (CPI)?
 4. Are new constructions exempt?

@@ -29,8 +29,18 @@ def score_units_covered(text):
     else:
         return 0.2
 
+def normalize_rent_increase_limit(text):
+    try:
+        value = float(text)
+        if value < 1:
+            return f"{value * 100:.1f}%"  
+    except:
+        pass
+    return text
+
 df = df[["Municipality", "Units-in-Structure Ordinance Applies to", "Rent Increase Limit", "Exceptions"]]
 df["units_covered"] = df["Units-in-Structure Ordinance Applies to"].apply(score_units_covered)
+df["Rent Increase Limit"] = df["Rent Increase Limit"].apply(normalize_rent_increase_limit)
 
 with open("prompt_template.txt", "r") as f:
     prompt_template = f.read()
