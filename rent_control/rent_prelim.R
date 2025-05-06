@@ -61,4 +61,3 @@ ggplot(nj_summary, aes(x = Date, y = Bldgs, group = Name, color = Name)) +
 
 
 
-

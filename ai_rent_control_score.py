@@ -8,10 +8,29 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 input_path = "openai_nj_rent_control_survey.xlsx"
 df = pd.read_excel(input_path)
-df = pd.read_excel(input_path)
 df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
 
+def score_units_covered(text):
+    t = str(text).lower().strip()
+    if "1+" in t:
+        return 1.0
+    elif "2+" in t or "2 family" in t:
+        return 0.9
+    elif "3+" in t or "4+" in t:
+        return 0.8
+    elif "5+" in t or "6+" in t or "10+" in t:
+        return 0.6
+    elif "20+" in t or "21+" in t:
+        return 0.4
+    elif "mobile home" in t:
+        if "senior" in t:
+            return 0.3
+        return 0.5
+    else:
+        return 0.2
+
 df = df[["Municipality", "Units-in-Structure Ordinance Applies to", "Rent Increase Limit", "Exceptions"]]
+df["units_covered"] = df["Units-in-Structure Ordinance Applies to"].apply(score_units_covered)
 
 with open("prompt_template.txt", "r") as f:
     prompt_template = f.read()
@@ -21,8 +40,8 @@ def build_prompt(row):
         Municipality=row['Municipality'],
         Rent_Increase_Limit=row['Rent Increase Limit'],
         Exceptions=row['Exceptions'],
-        units_in_structure=row["Units-in-Structure Ordinance Applies to"]
     )
+
 for idx, row in tqdm(df.iterrows(), total=len(df)):
     prompt = build_prompt(row)
     try:
@@ -57,10 +76,7 @@ for col in score_cols:
     if col not in df.columns:
         df[col] = None
 
-# Unweighted: simple average of non-null scores
 df["rent_control_unweighted"] = df[score_cols].mean(axis=1)
-
-# Weighted index
 df["rent_control_weighted"] = df.apply(
     lambda row: sum(row[k] * w for k, w in weights.items() if pd.notnull(row[k])),
     axis=1
