@@ -1,7 +1,7 @@
-The following rent control policy text is from {municipality}, New Jersey:
+he following rent control policy text is from {Municipality}, New Jersey:
 
-Rent Increase Limit: "{rent_increase_limit}"
-Exceptions: "{exceptions}"
+Rent Increase Limit: "{Rent_Increase_Limit}"
+Exceptions: "{Exceptions}"
 Units-in-Structure Ordinance Applies to: "{units_in_structure}"
 
 Based on this information, please answer:
@@ -14,11 +14,11 @@ Based on this information, please answer:
 
 Respond in JSON format with a score from 0 to 1 for each item, where 1 = most restrictive.
 Use this JSON structure:
-{
+{{
   "max_rent_increase": float,
   "sf_exempt": float,
   "cpi_tied": float,
   "new_construction_exempt": float,
   "hardship_appeals": float,
   "units_covered": float
-}
+}}

@@ -8,8 +8,10 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 input_path = "openai_nj_rent_control_survey.xlsx"
 df = pd.read_excel(input_path)
+df = pd.read_excel(input_path)
+df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
 
-df = df[["Municipality","Units-in-Structure Ordinance Applies to", "Rent Increase Limit", "Exceptions"]].dropna(subset=["Rent Increase Limit"]).reset_index(drop=True)
+df = df[["Municipality", "Units-in-Structure Ordinance Applies to", "Rent Increase Limit", "Exceptions"]]
 
 with open("prompt_template.txt", "r") as f:
     prompt_template = f.read()
