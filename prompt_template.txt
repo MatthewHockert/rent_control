@@ -1,0 +1,24 @@
+The following rent control policy text is from {municipality}, New Jersey:
+
+Rent Increase Limit: "{rent_increase_limit}"
+Exceptions: "{exceptions}"
+Units-in-Structure Ordinance Applies to: "{units_in_structure}"
+
+Based on this information, please answer:
+1. What is the maximum allowed rent increase (numeric or CPI-tied)?
+2. Are single-family or small multifamily homes exempt?
+3. Is rent increase tied to inflation (CPI)?
+4. Are new constructions exempt?
+5. Are hardship appeals allowed?
+6. Based on the units covered, how broad is the policy's coverage?
+
+Respond in JSON format with a score from 0 to 1 for each item, where 1 = most restrictive.
+Use this JSON structure:
+{
+  "max_rent_increase": float,
+  "sf_exempt": float,
+  "cpi_tied": float,
+  "new_construction_exempt": float,
+  "hardship_appeals": float,
+  "units_covered": float
+}
