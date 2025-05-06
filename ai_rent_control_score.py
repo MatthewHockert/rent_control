@@ -2,6 +2,7 @@ from openai import OpenAI
 import pandas as pd
 import time
 import os
+import re
 from tqdm import tqdm
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -29,18 +30,42 @@ def score_units_covered(text):
     else:
         return 0.2
 
-def normalize_rent_increase_limit(text):
+
+def normalize_numeric_only(value):
     try:
-        value = float(text)
-        if value < 1:
-            return f"{value * 100:.1f}%"  
+        num = float(value)
+        if num < 1:
+            return f"{round(num * 100, 1)}%"
+        else:
+            return f"{round(num, 1)}%"
     except:
-        pass
-    return text
+        return value
+
+def extract_most_restrictive_cap(text):
+    if pd.isnull(text):
+        return None
+
+    # Convert float-only entries like 0.05 to "5.0%"
+    text = str(text).strip()
+    cleaned = normalize_numeric_only(text)
+
+    # Extract all percentage-like patterns
+    percent_matches = re.findall(r"(\d+\.?\d*)\s*%", text)
+    decimal_matches = re.findall(r"\b0?\.\d+\b", text)
+
+    scores = []
+    scores += [float(p) for p in percent_matches]
+    scores += [float(d) * 100 for d in decimal_matches if float(d) < 1]
+
+    if scores:
+        most_restrictive = min(scores)
+        return f"{round(most_restrictive, 1)}%"
+    
+    return cleaned
 
 df = df[["Municipality", "Units-in-Structure Ordinance Applies to", "Rent Increase Limit", "Exceptions"]]
 df["units_covered"] = df["Units-in-Structure Ordinance Applies to"].apply(score_units_covered)
-df["Rent Increase Limit"] = df["Rent Increase Limit"].apply(normalize_rent_increase_limit)
+df["Rent Increase Limit"] = df["Rent Increase Limit"].apply(extract_most_restrictive_cap)
 
 with open("prompt_template.txt", "r") as f:
     prompt_template = f.read()

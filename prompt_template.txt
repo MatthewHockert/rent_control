@@ -21,3 +21,4 @@ Use this JSON structure:
   "new_construction_exempt": float,
   "hardship_appeals": float
 }}
+Use a scale of 0 to 1 where 1 is the most restrictive.
