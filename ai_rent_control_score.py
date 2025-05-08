@@ -3,7 +3,9 @@ import pandas as pd
 import time
 import os
 import re
+from pca_weighted_index import compute_pca_weighted_index
 from tqdm import tqdm
+import json
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -30,42 +32,32 @@ def score_units_covered(text):
     else:
         return 0.2
 
-
-def normalize_numeric_only(value):
-    try:
-        num = float(value)
-        if num < 1:
-            return f"{round(num * 100, 1)}%"
-        else:
-            return f"{round(num, 1)}%"
-    except:
-        return value
-
-def extract_most_restrictive_cap(text):
-    if pd.isnull(text):
+def extract_numeric_cap(text):
+    if pd.isnull(text) or str(text).strip().lower() in ["unknown", ""]:
         return None
-
-    # Convert float-only entries like 0.05 to "5.0%"
-    text = str(text).strip()
-    cleaned = normalize_numeric_only(text)
-
-    # Extract all percentage-like patterns
+    text = str(text).lower()
     percent_matches = re.findall(r"(\d+\.?\d*)\s*%", text)
     decimal_matches = re.findall(r"\b0?\.\d+\b", text)
-
-    scores = []
-    scores += [float(p) for p in percent_matches]
-    scores += [float(d) * 100 for d in decimal_matches if float(d) < 1]
-
-    if scores:
-        most_restrictive = min(scores)
-        return f"{round(most_restrictive, 1)}%"
-    
-    return cleaned
+    scores = [float(p) for p in percent_matches] + [float(d) * 100 for d in decimal_matches if float(d) < 1]
+    return min(scores) if scores else None
 
 df = df[["Municipality", "Units-in-Structure Ordinance Applies to", "Rent Increase Limit", "Exceptions"]]
 df["units_covered"] = df["Units-in-Structure Ordinance Applies to"].apply(score_units_covered)
-df["Rent Increase Limit"] = df["Rent Increase Limit"].apply(extract_most_restrictive_cap)
+df["cap_numeric"] = df["Rent Increase Limit"].apply(extract_numeric_cap)
+cap_values = pd.to_numeric(df["cap_numeric"], errors="coerce")
+cap_max = cap_values.max()
+
+def inverse_score(cap_pct):
+    if cap_pct is None:
+        return None
+    try:
+        cap = float(cap_pct)
+        cap = min(cap, cap_max)
+        return round(1 - (cap / cap_max), 3)
+    except:
+        return None
+
+df["max_rent_increase"] = df["cap_numeric"].apply(inverse_score)
 
 with open("prompt_template.txt", "r") as f:
     prompt_template = f.read()
@@ -88,34 +80,27 @@ for idx, row in tqdm(df.iterrows(), total=len(df)):
             ],
             temperature=0
         )
-        answer = response.choices[0].message.content
-        parsed = eval(answer)
+        answer = response.choices[0].message.content.strip()
+        if answer.startswith("```"):
+            answer = re.sub(r"^```json|^```|```$", "", answer.strip(), flags=re.MULTILINE).strip()
+        parsed = json.loads(answer)
         for k, v in parsed.items():
-            df.loc[idx, k] = v
-        time.sleep(1.2)
-    except Exception as e:
-        print(f"Error at row {idx}: {e}")
+            colname = f"chat_{k}" if k == "max_rent_increase" else k
+            df.loc[idx, colname] = v
+    except json.JSONDecodeError:
+        print(f"Failed to parse JSON at row {idx}: {answer}")
         continue
 
-weights = {
-    "max_rent_increase": 0.25,
-    "sf_exempt": 0.15,
-    "cpi_tied": 0.15,
-    "new_construction_exempt": 0.15,
-    "hardship_appeals": 0.1,
-    "units_covered": 0.2
-}
-
-score_cols = list(weights.keys())
+score_cols = ["max_rent_increase", "sf_exempt", "cpi_tied", "new_construction_exempt", "hardship_appeals", "units_covered"]
 for col in score_cols:
-    if col not in df.columns:
-        df[col] = None
+    df[col] = pd.to_numeric(df[col], errors="coerce")
 
-df["rent_control_unweighted"] = df[score_cols].mean(axis=1)
-df["rent_control_weighted"] = df.apply(
-    lambda row: sum(row[k] * w for k, w in weights.items() if pd.notnull(row[k])),
-    axis=1
-)
+pca_cols = ["sf_exempt", "cpi_tied", "new_construction_exempt", "hardship_appeals", "units_covered"]
+df, pca_weights = compute_pca_weighted_index(df, pca_cols)
+df["rent_control_unweighted"] = df[pca_cols].mean(axis=1)
+
+with open("pca_weights.json", "w") as f:
+    json.dump(pca_weights, f, indent=2)
 
 output_path = "rent_control_scored_output.xlsx"
 df.to_excel(output_path, index=False)
