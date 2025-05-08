@@ -21,6 +21,11 @@ nj_survey_dates <- nj_survey_dates %>%
       NA_Date_
     } else {
       min(c_across(all_of(date_cols)), na.rm = TRUE)
+    },
+    latest_ordinance_date = if (all(is.na(c_across(all_of(date_cols))))) {
+      NA_Date_
+    } else {
+      max(c_across(all_of(date_cols)), na.rm = TRUE)
     }
   ) %>%
   ungroup()

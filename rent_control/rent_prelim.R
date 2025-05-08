@@ -1,3 +1,5 @@
+options(max.print = 10000)
+library(beepr)
 library(tidyverse)
 nj_crosswalk <- read.csv('../NJ_Municipality_Crosswalk.csv')
 
@@ -77,6 +79,8 @@ ggplot(nj_summary, aes(x = Year, y = multi_family, color = Name,group = Name)) +
 print(unique(rent_control_intensity$Municipality))
 print(unique(nj_all$Place_Name))
 
+
+#### Continuous treatment ----
 rent_control_intensity <- read_excel("../rent_control_scored_output.xlsx")
 nj_all <- nj_all %>%
   mutate(Place_Name_Clean = str_to_lower(str_trim(Place_Name)))
@@ -86,8 +90,13 @@ rent_control_intensity <- rent_control_intensity %>%
 
 rent_control_intensity <- merge(rent_control_intensity, nj_crosswalk,
                                 by.x = "Municipality_Clean", by.y = "rent_control_name", all.x = TRUE)
+
 merged_df <- merge(nj_all, rent_control_intensity,
-                   by.x = "Place_Name_Clean", by.y = "nj_all_match", all.x = TRUE)
+                   by.x = "Place_Name_Clean", by.y = "nj_all_match")
+
+"woodland park borough" %in% nj_crosswalk$rent_control_name
+"woodland park borough" %in% merged_df$Place_Name_Clean
+"woodland park borough" %in% rent_control_intensity$Municipality_Clean
 
 library(lubridate)
 
@@ -95,21 +104,23 @@ nj_summary <- merged_df %>%
   filter(Year >= 2018, Year <= 2024)
 print(unique(nj_summary$Place_Name_Clean))
 
-summary(lm(log_change ~ RCI, bldgs_change))
 
 bldgs_change <- nj_summary %>%
   mutate(period = ifelse(Year < 2022, "pre", "post")) %>%
   group_by(Name, period) %>%
-  summarise(single_family = mean(Bldgs, na.rm = TRUE),
-            multi_family = mean(multi_family,na.rm = T),
+  summarise(multi_family = mean(multi_family, na.rm = TRUE),
             RCI = first(rent_control_unweighted), .groups = "drop") %>%
-  pivot_wider(names_from = period, values_from = single_family) %>%
+  pivot_wider(names_from = period, values_from = multi_family) %>%
   mutate(log_change = log(post + 1) - log(pre + 1))
+summary(lm(log_change ~ RCI, bldgs_change))
 
 #bldgs_change$log_change <- log(bldgs_change$Year_2024 + 1) - log(bldgs_change$Year_2018 + 1)
 bldgs_change$level_change <- bldgs_change$post - bldgs_change$pre
 
-plot(bldgs_change$RCI,bldgs_change$Pct_Change)
+summary(bldgs_change)
+table(complete.cases(bldgs_change$log_change, bldgs_change$RCI))
+
+plot(bldgs_change$RCI,bldgs_change$log_change)
 summary(lm(log_change ~ RCI, bldgs_change))
 summary(lm(level_change ~ RCI, bldgs_change))
 
@@ -128,9 +139,10 @@ bldgs_change$RCI_bin <- cut(bldgs_change$RCI, breaks = quantile(bldgs_change$RCI
 summary(lm(log_change ~ RCI_bin, data = bldgs_change))
 
 
-ggplot(merged_df %>% filter(Year == "2024"), aes(x = multi_family, y = single_family, color = rent_control_unweighted)) +
+ggplot(merged_df, aes(x = log(multi_family), y = log(single_family), color = rent_control_unweighted)) +
   geom_point() +
-  geom_smooth(method = "lm",se = F)+
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_viridis_c(option = "B", begin = 0.2, end = 0.9) +
   theme_minimal()
 
 ggplot(merged_df %>% filter(Year == "2024"), aes(x = rent_control_unweighted, y = single_family)) +
@@ -155,10 +167,10 @@ plot(factor(merged_df$new_construction_exempt),merged_df$rent_control_unweighted
 
 #rent_control_pca
 summary(lm(log(multi_family+1) ~ factor(new_construction_exempt)*rent_control_unweighted + factor(Year) + factor(Name), data = merged_df))
-summary(lm(log(multi_family+1) ~ rent_control_pca + factor(Year) + factor(Name), data = merged_df))
+summary(lm(log(multi_family+1) ~ factor(rent_control_unweighted) + factor(Year) + factor(Name), data = merged_df))
 
 summary(lm(log(single_family+1) ~  factor(new_construction_exempt)*rent_control_unweighted + factor(Year) + factor(Name), data = merged_df))
-summary(lm(log(single_family+1) ~ rent_control_pca + factor(Year) + factor(Name), data = merged_df))
+summary(lm(log(single_family+1) ~ rent_control_unweighted + factor(Year) + factor(Name), data = merged_df))
 
 
 model <- lm(
@@ -260,4 +272,227 @@ summary(dynamic_att)
 ggdid(dynamic_att)
 
 
+#### continous/staggered ----
+rent_control_intensity <- read_excel("../rent_control_scored_output.xlsx")
 
+# Clean municipality names
+rent_control_intensity <- rent_control_intensity %>%
+  mutate(Municipality_Clean = str_to_lower(str_trim(Municipality)))
+
+nj_survey_filtered <- nj_survey_filtered %>%
+  mutate(Municipality_Clean = str_to_lower(str_trim(Municipality)))
+
+# Merge both datasets with crosswalk to get nj_all_match
+rent_control_intensity <- merge(
+  rent_control_intensity, nj_crosswalk,
+  by.x = "Municipality_Clean", by.y = "rent_control_name", all.x = TRUE
+)
+
+nj_survey_filtered <- merge(
+  nj_survey_filtered, nj_crosswalk,
+  by.x = "Municipality_Clean", by.y = "rent_control_name", all.x = TRUE
+)
+
+# Merge rent_control_intensity and nj_survey_filtered into a single dataset
+rc_combined <- merge(
+  rent_control_intensity, nj_survey_filtered,
+  by = "Municipality_Clean", suffixes = c("_rc", "_dates"), all = TRUE
+)
+
+# Join to nj_all only once
+con_stag <- merge(
+  nj_all,
+  rc_combined,
+  by.x = "Place_Name_Clean", by.y = "nj_all_match", all.x = TRUE
+)
+
+# Convert treatment year to numeric
+con_stag$treatment_year <- as.numeric(format(con_stag$latest_ordinance_date, "%Y"))
+treated_df <- con_stag %>%
+  # filter(!is.na(latest_ordinance_date)) %>%
+  mutate(treatment_year = year(latest_ordinance_date))
+
+bldgs_change <- treated_df %>%
+  # filter(Year >= treatment_year - 4 & Year <= treatment_year + 4) %>%
+  mutate(period = ifelse(Year < treatment_year, "pre", "post")) %>%
+  group_by(Name, period) %>%
+  summarise(
+    multi_family = mean(multi_family, na.rm = TRUE),
+    RCI = first(rent_control_unweighted),
+    treatment_year = first(treatment_year),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = period, values_from = multi_family) %>%
+  mutate(log_change = log(post + 1) - log(pre + 1))
+
+summary(lm(log_change ~ RCI, data = bldgs_change))
+summary(lm(log_change ~ RCI + factor(treatment_year), data = bldgs_change))
+
+ggplot(bldgs_change, aes(x = RCI, y = log_change)) +
+  geom_point() +
+  geom_smooth(method = "lm",se = F)+
+  theme_minimal()
+
+bldgs_change %>%
+  mutate(RCI_bin = cut(RCI, breaks = quantile(RCI, probs = seq(0, 1, 0.25), na.rm = TRUE), include.lowest = TRUE)) %>%
+  ggplot(aes(x = RCI_bin, y = log_change)) +
+  geom_boxplot() +
+  labs(x = "RCI Quartile", y = "Log Change in Multifamily Permits") +
+  theme_minimal()
+
+treated_df %>%
+  mutate(RCI_q = ntile(rent_control_unweighted, 4),
+         period = ifelse(Year < treatment_year, "Pre", "Post")) %>%
+  group_by(RCI_q, period) %>%
+  summarise(mean_mf = mean(multi_family, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = period, y = mean_mf, fill = factor(RCI_q))) +
+  geom_col(position = "dodge") +
+  labs(x = "Period", y = "Avg. Multifamily Permits", fill = "RCI Quartile") +
+  theme_minimal()
+
+
+ggplot(treated_df, aes(x = log(multi_family), y = log(single_family), color = rent_control_unweighted)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_viridis_c(option = "B", begin = 0.2, end = 0.9) +
+  theme_minimal()
+
+ggplot(treated_df, aes(x = rent_control_unweighted, y = single_family)) +
+  geom_point() +
+  geom_smooth(method = "lm",se = F)+
+  theme_minimal()
+
+
+treated_df %>%
+  filter(!is.na(treatment_year)) %>%
+  mutate(rel_year = Year - as.numeric(treatment_year)) %>%
+  filter(rel_year >= -5 & rel_year <= 5) %>%
+  group_by(rel_year) %>%
+  summarise(mean_mf = mean(multi_family, na.rm = TRUE)) %>%
+  ggplot(aes(x = rel_year, y = mean_mf)) +
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Years Since Rent Control Adoption", y = "Avg. Multifamily Permits") +
+  theme_minimal()
+
+treated_df %>%
+  filter(!is.na(treatment_year)) %>%
+  mutate(
+    Year = as.integer(Year),
+    treatment_year = as.integer(treatment_year),
+    rel_year = Year - treatment_year
+  ) %>%
+  # filter(rel_year >= -5 & rel_year <= 5) %>%
+  group_by(rel_year) %>%
+  summarise(mean_mf = mean(multi_family, na.rm = TRUE)) %>%
+  ggplot(aes(x = rel_year, y = mean_mf)) +
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Years Since Rent Control Adoption", y = "Avg. Multifamily Permits") +
+  theme_minimal()
+
+treated_df %>%
+  filter(!is.na(treatment_year), !is.na(rent_control_unweighted)) %>%
+  mutate(
+    Year = as.integer(Year),
+    treatment_year = as.integer(treatment_year),
+    rel_year = Year - treatment_year,
+    RCI_bin = ntile(rent_control_unweighted, 4)
+  ) %>%
+  # filter(rel_year >= -5 & rel_year <= 5) %>%
+  group_by(rel_year, RCI_bin) %>%
+  summarise(mean_mf = mean(log(multi_family+1), na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = rel_year, y = (mean_mf), color = as.factor(RCI_bin))) +
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    color = "RCI Quartile",
+    x = "Years Since Rent Control Adoption",
+    y = "Avg. Multifamily Permits"
+  ) +
+  theme_minimal()
+
+print(unique(treated_df$treatment_year))
+es_df <- treated_df %>%
+  #filter(!is.na(treatment_year)) %>%
+  mutate(
+    Year = as.integer(Year),
+    treatment_year = as.integer(treatment_year),
+    rel_year = Year - treatment_year,
+    RCI_bin = ntile(rent_control_unweighted, 4)) 
+#%>% filter(rel_year >= -5, rel_year <= 5)
+
+
+summary(lm(log(multi_family+1) ~ factor(RCI_bin)*factor(rel_year) + Place_Name_Clean + factor(Year), data = es_df))
+
+subset_12 <- es_df %>% filter(RCI_bin %in% c(1, 2))
+summary(lm(log(multi_family + 1) ~ factor(RCI_bin) * factor(rel_year) + Place_Name_Clean + factor(Year), data = subset_12))
+
+subset_34 <- es_df %>% filter(RCI_bin %in% c(3, 4))
+
+summary(lm(log(multi_family + 1) ~ factor(RCI_bin) * factor(rel_year) + Place_Name_Clean + factor(Year), data = subset_34))
+
+
+
+treated_df %>%
+  filter(!is.na(treatment_year)) %>%
+  mutate(
+    rel_year = as.integer(Year) - as.integer(treatment_year)
+  ) %>%
+  filter(rel_year >= -5, rel_year <= 5) %>%
+  ggplot(aes(x = rel_year, y = multi_family, color = rent_control_unweighted)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  scale_color_viridis_c() +
+  theme_minimal()
+
+feols(log(multi_family + 1) ~ rel_year * rent_control_unweighted | Place_Name_Clean + Year, data = es_df)
+
+es_df$log_multi_family <- log(es_df$multi_family+1)
+es_df$id <- as.numeric(factor(es_df$Place_Name_Clean))
+es_df$treatment_year[is.na(es_df$treatment_year)] <- 0
+es_df <- es_df %>%
+  mutate(
+    id = id,
+    time = as.integer(Year),
+    G = as.integer(treatment_year),  # G is the first treatment year
+    treated = !is.na(G)
+  )
+print(unique(es_df$G))
+
+cs_mod <- att_gt(
+  yname = "multi_family",        # or log(multi_family + 1)
+  tname = "time",
+  idname = "id",
+  gname = "G",
+  data = es_df,
+  panel = F,
+  control_group = "notyettreated"
+)
+
+dynamic_att <- aggte(cs_mod, type = "dynamic",na.rm = TRUE)
+summary(dynamic_att)
+ggdid(dynamic_att)
+beep()
+
+
+es_rci1 <- es_df %>% filter(RCI_bin == 4 | G==0)
+print(unique(es_rci1$G))
+
+cs_mod_rci1 <- att_gt(
+  yname = "log_multi_family",           # or log(multi_family + 1)
+  tname = "time",
+  idname = "id",
+  gname = "G",
+  data = es_rci1,
+  panel = FALSE,
+  control_group = "nevertreated"
+)
+
+dynamic_att <- aggte(cs_mod_rci1, type = "dynamic",na.rm = TRUE)
+summary(dynamic_att)
+ggdid(dynamic_att)
+beep()
