@@ -1,5 +1,18 @@
 library(dplyr)
 library(lubridate)
+library(sf)
+
+nj_muni_shape <- st_read("../NJ_Municipal_Boundaries_3424_2278012401268357461")
+#nj_muni_shape$geometry <- st_centroid(nj_muni_shape$geometry)
+nj_muni_shape <- select(nj_muni_shape,c("NAME","MUN_TYPE","SQ_MILES","geometry"))
+#st_write(nj_muni_shape,"nj_muni_shape.shp",append=F)
+
+
+nj_muni_shape <- nj_muni_shape %>%
+  mutate(Municipality_Clean = str_to_lower(str_trim(NAME)))
+
+nj_muni_df <- st_drop_geometry(nj_muni_shape)
+
 
 nj_survey <-readxl::read_excel("../openai_nj_rent_control_survey.xlsx")
 print(unique(nj_survey$`Units-in-Structure Ordinance Applies to`))
@@ -7,9 +20,10 @@ print(unique(nj_survey$`Rent Increase Limit`))
 print(unique(nj_survey$`Rent Control Office/Board`))
 
 nj_survey_dates <-readxl::read_excel("../NJ_Rent_Control_Survey_with_dates.xlsx")
+sum(is.na(nj_survey_dates$ordinance_date_1))
 # NJ_Rent_Control_Survey_with_dates.xlsx
 names(nj_survey_dates)
-
+print(unique(nj_survey_dates$`Rent Control Office/Board`))
 # Convert ordinance date columns to Date type
 date_cols <- grep("^ordinance_date_", names(nj_survey_dates), value = TRUE)
 nj_survey_dates[date_cols] <- lapply(nj_survey_dates[date_cols], ymd)
@@ -26,13 +40,14 @@ nj_survey_dates <- nj_survey_dates %>%
       NA_Date_
     } else {
       max(c_across(all_of(date_cols)), na.rm = TRUE)
+    },
+    latest_pre2022_ordinance_date = {
+      valid_dates <- c_across(all_of(date_cols))
+      valid_pre2022 <- valid_dates[!is.na(valid_dates) & valid_dates < as.Date("2022-01-01")]
+      if (length(valid_pre2022) == 0) NA_Date_ else max(valid_pre2022)
     }
   ) %>%
   ungroup()
 
-# Filter rows where the earliest ordinance date is after 2000-01-01
-nj_survey_filtered <- nj_survey_dates %>%
-  filter(earliest_ordinance_date > ymd("2000-01-01"))
 
-nj_survey_filtered <- nj_survey_filtered %>%
-  mutate(Municipality_Clean = str_to_lower(str_trim(Municipality)))
+

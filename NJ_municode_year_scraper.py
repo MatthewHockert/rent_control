@@ -6,19 +6,41 @@ import time
 from datetime import datetime
 
 def extract_dates(text):
-    date_pattern = r'\b\d{1,2}-\d{1,2}-\d{2,4}\b'
-    matches = re.findall(date_pattern, text)
+    date_pattern = r'\b\d{1,4}-\d{1,2}-\d{1,4}\b'
+    year_pattern = r'\b(?:19|20)\d{2}\b'
+
+    # Find all date-like matches
+    matches = [m for m in re.finditer(date_pattern, text)]
+    year_matches = re.findall(year_pattern, text)
+
     dates = []
-    for date_str in matches:
-        try:
-            parsed_date = datetime.strptime(date_str, "%m-%d-%Y")
-        except ValueError:
+
+    for match in matches:
+        date_str = match.group(0)
+        start_idx = match.start()
+        context_before = text[max(0, start_idx - 10):start_idx].lower()
+
+        if "ord. no." in context_before:
+            continue  # Skip likely ordinance number
+
+        for fmt in ("%m-%d-%Y", "%m-%d-%y", "%Y-%m-%d", "%d-%m-%Y"):
             try:
-                parsed_date = datetime.strptime(date_str, "%m-%d-%y")
+                parsed_date = datetime.strptime(date_str, fmt)
+                dates.append(parsed_date)
+                break
             except ValueError:
-                print(f"Skipping unrecognized date format: {date_str}")
                 continue
-        dates.append(parsed_date)
+        else:
+            print(f"Skipping unrecognized date format: {date_str}")
+
+    for y in set(year_matches):
+        try:
+            year_date = datetime(int(y), 1, 1)
+            if year_date not in dates:
+                dates.append(year_date)
+        except:
+            continue
+
     return sorted(dates, reverse=True)
 
 print("Loading Excel file...")
@@ -46,7 +68,9 @@ for i, url in enumerate(df['Rent Control Ordinance']):
         all_repealed_dates.append(None)
         continue
 
-    print(f"\n[{i+1}/{total}] Processing URL: {url}")
+    municipality = df.loc[i, 'Municipality']
+    print(f"\n[{i+1}/{total}] Processing municipality: {municipality}")
+    print(f"Processing URL: {url}")
     dates = []
     repealed_date = None
 
@@ -59,56 +83,75 @@ for i, url in enumerate(df['Rent Control Ordinance']):
             soup = BeautifulSoup(response.text, 'html.parser')
             text = soup.get_text()
 
-            for block in re.findall(r'\[.*?\]', text, re.DOTALL):
-                if 'repealed' in block.lower():
-                    match = re.search(r'\d{1,2}-\d{1,2}-\d{2,4}', block)
-                    if match:
-                        try:
-                            repealed_date = datetime.strptime(match.group(0), "%m-%d-%Y")
-                        except ValueError:
-                            repealed_date = datetime.strptime(match.group(0), "%m-%d-%y")
-                        print(f"Found repealed date: {repealed_date.strftime('%Y-%m-%d')}")
-                        break
-
-            bracket_block = None
-            history_match = re.search(r'\[HISTORY:.*?\]', text, re.DOTALL | re.IGNORECASE)
-            if history_match:
-                bracket_block = history_match.group(0)
-                print("Found [HISTORY: ...] block.")
-            else:
-                all_brackets = re.findall(r'\[.*?\]', text, re.DOTALL)
-                for block in all_brackets:
+            is_municode = url.startswith("https://library.municode.com/")
+            if is_municode:
+                print("Detected Municode page.")
+                paren_blocks = re.findall(r'\(.*?\)', text, re.DOTALL)
+                municode_dates = []
+                for block in paren_blocks:
                     if re.search(r'\d{1,2}-\d{1,2}-\d{2,4}', block):
-                        bracket_block = block
-                        print("Found alternative [ ... ] block with date.")
-                        break
+                        municode_dates.extend(extract_dates(block))
+                if municode_dates:
+                    dates = sorted(municode_dates, reverse=True)
+                    print(f"Found {len(dates)} Municode ordinance dates: {[d.strftime('%Y-%m-%d') for d in dates]}")
 
-            dates = []
-            if bracket_block:
-                dates = extract_dates(bracket_block)
-                print(f"Found {len(dates)} ordinance dates: {[d.strftime('%Y-%m-%d') for d in dates]}")
-            else:
-                print("No date-containing bracket block found.")
-                # Try fallback 1: look for Rent Control Office/Board keyword
-                fallback_phrase = df.loc[i, 'Rent Control Office/Board']
-                if isinstance(fallback_phrase, str) and fallback_phrase.strip().lower() not in ['nan', 'none', '']:
-                    fallback_phrase = fallback_phrase.strip()
-                    idx = text.lower().find(fallback_phrase.lower())
-                    if idx != -1:
-                        bracket_match = re.search(r'\[.*?\]', text[idx:], re.DOTALL)
-                        if bracket_match:
-                            fallback_block = bracket_match.group(0)
-                            dates = extract_dates(fallback_block)
-                            print(f"Found {len(dates)} fallback dates after '{fallback_phrase}': {[d.strftime('%Y-%m-%d') for d in dates]}")
-                # Try fallback 2: look for "rent control" and next bracket
-                if not dates:
-                    idx = text.lower().find("rent control")
-                    if idx != -1:
-                        bracket_match = re.search(r'\[.*?\]', text[idx:], re.DOTALL)
-                        if bracket_match:
-                            fallback_block = bracket_match.group(0)
-                            dates = extract_dates(fallback_block)
-                            print(f"Found {len(dates)} fallback dates after 'Rent Control': {[d.strftime('%Y-%m-%d') for d in dates]}")
+            if not dates:
+                for block in re.findall(r'\[.*?\]', text, re.DOTALL):
+                    if 'repealed' in block.lower():
+                        match = re.search(r'\d{1,2}-\d{1,2}-\d{2,4}', block)
+                        if match:
+                            try:
+                                repealed_date = datetime.strptime(match.group(0), "%m-%d-%Y")
+                            except ValueError:
+                                repealed_date = datetime.strptime(match.group(0), "%m-%d-%y")
+                            print(f"Found repealed date: {repealed_date.strftime('%Y-%m-%d')}")
+                            break
+
+                bracket_block = None
+                history_match = re.search(r'\[HISTORY:.*?\]', text, re.DOTALL | re.IGNORECASE)
+                if history_match:
+                    bracket_block = history_match.group(0)
+                    print("Found [HISTORY: ...] block.")
+                else:
+                    all_brackets = re.findall(r'\[.*?\]', text, re.DOTALL)
+                    for block in all_brackets:
+                        if re.search(r'\d{1,2}-\d{1,2}-\d{2,4}', block):
+                            bracket_block = block
+                            print("Found alternative [ ... ] block with date.")
+                            break
+
+                if bracket_block:
+                    dates = extract_dates(bracket_block)
+                    print(f"Found {len(dates)} ordinance dates: {[d.strftime('%Y-%m-%d') for d in dates]}")
+                else:
+                    print("No date-containing bracket block found. Checking fallback phrases")
+                    fallback_phrases = [
+                        "Rent Leveling Board", "Division of Landlord Tenant Affairs", "Bayonne Rent Control Board",
+                        "Rent Review Board", "Bureau of Rent Control", "Rent Control Board",
+                        "Division of Rent Leveling", "Township of East Windsor", "Fair Rental Housing Board",
+                        "Administrative Hearing Officer", "Rent Leveling Office", "Township of Gloucester",
+                        "Rental Stabilization Board", "Rent Leveling Commission", "Rent Leveling & Stabilization Office",
+                        "Mobile Home Rent Control Board", "Office of Landlord Tenant Relations", "Rent Stabilization Board",
+                        "Rent Advisory Board", "Rent Stabilization Board", "Rent Control Office",
+                        "Mobile Home Park Rent Leveling Board", "Rent Leveling Department", "Office of Rent Control",
+                        "Rent Leveling and Control Board", "Office of Rent Leveling", "Rent Stabilization Commission",
+                        "Randolph Township", "Rent Leveling Commission/Tenant Advocate", "Rent Board",
+                        "Administrative Monitoring Officer", "Mobile Home Rent Stabilization & Control Board",
+                        "Multiple Dwellings Regulation Board"
+                    ]
+                    bracket_matches = list(re.finditer(r'\[.*?\]', text, re.DOTALL))
+                    for match in bracket_matches:
+                        start_idx = match.start()
+                        context_window = text[max(0, start_idx - 200):start_idx].lower()
+                        for phrase in fallback_phrases:
+                            if phrase.lower() in context_window:
+                                fallback_block = match.group(0)
+                                dates = extract_dates(fallback_block)
+                                if dates:
+                                    print(f"Found {len(dates)} fallback dates near '{phrase}': {[d.strftime('%Y-%m-%d') for d in dates]}")
+                                    break
+                        if dates:
+                            break
         else:
             print(f"Failed to fetch page (status {response.status_code})")
     except Exception as e:
