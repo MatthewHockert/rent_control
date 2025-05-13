@@ -1,6 +1,7 @@
 options(max.print = 10000)
 library(beepr)
 library(tidyverse)
+library(readxl)
 nj_crosswalk <- read.csv('../NJ_Municipality_Crosswalk.csv')
 
 dewey_rental_micro <- read.csv('../sample_dewey.csv')
@@ -169,14 +170,14 @@ nj_all_updated <- nj_all_updated %>%
 
 nj_all_updated %>%
   #filter(Year >= 2010, Year <= 2015) %>%
-  filter(grepl("woodland park borough", Place_Name_Clean, ignore.case = TRUE)) %>%
+  filter(grepl("elmwood", Place_Name_Clean, ignore.case = TRUE)) %>%
   group_by(Place_Name_Clean, Year) %>%
   summarise(mf_units = sum(multi_family, na.rm = TRUE), .groups = "drop") %>%
   ggplot(aes(x= Year, y = mf_units, group = Place_Name_Clean, color = Place_Name_Clean)) +
   geom_line() +
   geom_point() +
   labs(
-    title = "Multifamily Units in Princeton-Area Places (2010–2015)",
+    title = "",
     x = "Year",
     y = "Multifamily Units",
     color = "Place Name"
@@ -422,12 +423,18 @@ invalid_munis <- nj_survey_dates %>%
 invalid_munis
 # union city
 staggered_rc_permits_ag <- staggered_rc_permits_ag %>%
-  filter(!Place_Name_Clean %in% invalid_munis)
+  filter(!Place_Name_Clean %in% invalid_munis)%>%
+  arrange(Place_Name_Clean,Year)
 
 table(staggered_rc_permits_ag$treatment_year)
 nrow(staggered_rc_permits_ag)
 staggered_rc_permits_ag <- merge(staggered_rc_permits_ag, nj_muni_df,by.x = "Place_Name_Clean", by.y="Municipality_Clean")
 nrow(staggered_rc_permits_ag)
+
+ggplot(staggered_rc_permits_ag %>% filter(Place_Name_Clean=="belleville township"), 
+       aes(x = year_num, y = multi_family_sum, color = treated)) +
+  stat_summary(fun = mean, geom = "line") +
+  labs(title = "Pre-Treatment Trends", y = "Log Multi-Family Permits")
 
 hist(log(staggered_rc_permits_ag$multi_family_sum/staggered_rc_permits_ag$SQ_MILES+1))
 staggered_rc_permits_ag$multi_family_sq_mile <- log(staggered_rc_permits_ag$multi_family_sum/staggered_rc_permits_ag$SQ_MILES+1)
@@ -448,13 +455,13 @@ ggplot(staggered_rc_permits_ag,
   labs(title = "Pre-Treatment Trends", y = "Log Multi-Family Permits")
 
 att_gt_out <- att_gt(
-  yname = "multi_family_sq_mile",
+  yname = "multi_family_mean",
   tname = "year_num",
   idname = "id",
   gname = "treatment_year",
   data = staggered_rc_permits_ag,
-  panel = F,
-  #xformla = ~MUN_TYPE + central_city,
+  panel = T,
+  xformla = ~MUN_TYPE + central_city,
   control_group = "nevertreated",
   est_method = "reg"
 )

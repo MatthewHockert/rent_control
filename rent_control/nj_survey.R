@@ -19,7 +19,7 @@ print(unique(nj_survey$`Units-in-Structure Ordinance Applies to`))
 print(unique(nj_survey$`Rent Increase Limit`))
 print(unique(nj_survey$`Rent Control Office/Board`))
 
-nj_survey_dates <-readxl::read_excel("../NJ_Rent_Control_Survey_with_dates.xlsx")
+nj_survey_dates <-readxl::read_excel("../NJ_Rent_Control_Survey_with_date2.xlsx")
 sum(is.na(nj_survey_dates$ordinance_date_1))
 # NJ_Rent_Control_Survey_with_dates.xlsx
 names(nj_survey_dates)
