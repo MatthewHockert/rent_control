@@ -2,6 +2,12 @@ options(max.print = 10000)
 library(beepr)
 library(tidyverse)
 library(readxl)
+library(readxl)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(purrr)
+
 nj_crosswalk <- read.csv('../NJ_Municipality_Crosswalk.csv')
 
 dewey_rental_micro <- read.csv('../sample_dewey.csv')
@@ -170,7 +176,7 @@ nj_all_updated <- nj_all_updated %>%
 
 nj_all_updated %>%
   #filter(Year >= 2010, Year <= 2015) %>%
-  filter(grepl("elmwood", Place_Name_Clean, ignore.case = TRUE)) %>%
+  filter(grepl("Woodbridge Township", Place_Name_Clean, ignore.case = TRUE)) %>%
   group_by(Place_Name_Clean, Year) %>%
   summarise(mf_units = sum(multi_family, na.rm = TRUE), .groups = "drop") %>%
   ggplot(aes(x= Year, y = mf_units, group = Place_Name_Clean, color = Place_Name_Clean)) +
@@ -225,11 +231,11 @@ print(unique(nj_summary$Place_Name_Clean))
 
 bldgs_change <- nj_summary %>%
   mutate(period = ifelse(Year < 2022, "pre", "post")) %>%
-  group_by(Name, period) %>%
-  summarise(multi_family = mean(multi_family, na.rm = TRUE),
+  group_by(Place_Name_Clean, period) %>%
+  summarise(multi_family = sum(multi_family, na.rm = TRUE),
             RCI = first(rent_control_unweighted), .groups = "drop") %>%
   pivot_wider(names_from = period, values_from = multi_family) %>%
-  mutate(log_change = log(post + 1) - log(pre + 1))
+  mutate(log_change = log(post+1) - log(pre+1))
 summary(lm(log_change ~ RCI, bldgs_change))
 
 #bldgs_change$log_change <- log(bldgs_change$Year_2024 + 1) - log(bldgs_change$Year_2018 + 1)
@@ -279,17 +285,17 @@ ggplot(merged_df, aes(x = rent_control_unweighted, y = single_family)) +
   theme_minimal()
 merged_df %>%
   filter(multi_family < 0) %>%
-  pull(Name)
+  pull(Place_Name_Clean)
 
 plot(factor(merged_df$new_construction_exempt),merged_df$rent_control_unweighted)
 
 #rent_control_pca
-summary(lm(log(multi_family+1) ~ factor(new_construction_exempt)*rent_control_unweighted + factor(Year) + factor(Name), data = merged_df))
-summary(lm(log(multi_family+1) ~ factor(rent_control_unweighted) + factor(Year) + factor(Name), data = merged_df))
+summary(lm(log(multi_family+1) ~ factor(new_construction_exempt)*rent_control_unweighted + factor(Year) + factor(Place_Name_Clean), data = merged_df))
+summary(lm(log(multi_family+1) ~ factor(rent_control_unweighted) + factor(Year) + factor(Place_Name_Clean), data = merged_df))
 
-summary(lm(log(single_family+1) ~  factor(new_construction_exempt)*rent_control_unweighted + factor(Year) + factor(Name), data = merged_df))
-summary(lm(log(single_family+1) ~ rent_control_unweighted + factor(Year) + factor(Name), data = merged_df))
-
+summary(lm(log(single_family+1) ~  factor(new_construction_exempt)*rent_control_unweighted + factor(Year) + factor(Place_Name_Clean), data = merged_df))
+summary(lm(log(single_family+1) ~ rent_control_unweighted + factor(Year) + factor(Place_Name_Clean), data = merged_df))
+table(merged_df$new_construction_exempt)
 
 model <- lm(
   log(multi_family + 1) ~ rent_control_unweighted * factor(new_construction_exempt) * period + 
@@ -335,7 +341,6 @@ pred_grid
 
 #### staggered timing ----
 library(did)
-rent_control_intensity <- read_excel("../rent_control_scored_output.xlsx")
 
 nj_survey_filtered <- nj_survey_dates %>%
   mutate(Municipality_Clean = str_to_lower(str_trim(Municipality))) %>%
@@ -365,16 +370,6 @@ staggered_rc_permits <- merge(
 )
 
 
-rent_control_intensity <- rent_control_intensity %>%
-  mutate(Municipality_Clean = str_to_lower(str_trim(Municipality)))
-
-rent_control_intensity <- merge(
-  rent_control_intensity,
-  nj_crosswalk,
-  by.x = "Municipality_Clean",
-  by.y = "rent_control_name",
-  all.x = TRUE
-)
 
 intensity_rc_panel <- merge(
   nj_all_updated,
@@ -489,58 +484,229 @@ staggered_rc_permits_ag %>%
 table(staggered_rc_permits_ag$treatment_year, useNA = "ifany")
 
 
-#### continous/staggered ----
-rent_control_intensity <- read_excel("../rent_control_scored_output.xlsx")
+ ##### V2 ----
+library(lubridate)
 
-# Clean municipality names - no year
-rent_control_intensity <- rent_control_intensity %>%
-  mutate(Municipality_Clean = str_to_lower(str_trim(Municipality)))
-nrow(rent_control_intensity)
+rent_dates <- readxl::read_excel("../rent_control_raw_dates_by_city.xlsx")
 
-nj_survey_filtered <- nj_survey_dates %>%
-  mutate(Municipality_Clean = str_to_lower(str_trim(Municipality)))
+rent_dates2 <- rent_dates %>%
+  mutate(
+    Municipality_Clean = str_to_lower(str_trim(Municipality)),
+    RentControl_Parsed = map(RentControl, function(x) {
+      if (is.na(x) || str_trim(x) == "") return(NA_Date_)
+      dates <- suppressWarnings(ymd(str_split(x, ";")[[1]]))
+      dates[!is.na(dates)]
+    }),
+    first_treatment_year = map_int(RentControl_Parsed, ~ if (all(is.na(.))) NA_integer_ else year(min(., na.rm = TRUE))),
+    last_treatment_year = map_int(RentControl_Parsed, ~ if (all(is.na(.))) NA_integer_ else year(max(., na.rm = TRUE))),
+    first_post_2000_treatment_year = map_int(RentControl_Parsed, function(d) {
+      post2000 <- d[d > ymd("2000-01-01")]
+      if (length(post2000) == 0) NA_integer_ else year(min(post2000))
+    }),
+    treatment_count = map_int(RentControl_Parsed, ~ length(unique(year(.))))
+  )%>%
+  select(-RentControl_Parsed)
 
-nrow(nj_survey_filtered)
-# Filter rows where the earliest ordinance date is after 2000-01-01
-nj_survey_filtered <- nj_survey_filtered %>%
-  group_by(Municipality_Clean)%>%
-  filter(ordinance_date_1 > ymd("2000-01-01"),latest_pre2022_ordinance_date > ymd("2000-01-01") & latest_pre2022_ordinance_date < ymd("2020-01-01"))%>%
+rent_dates2 <- merge(rent_dates2, nj_crosswalk,
+                    by.x = "Municipality_Clean",
+                    by.y = "rent_control_name", all.x = TRUE)
+
+rent_dates2$treatment_year <- year(rent_dates2$RentControl)
+
+
+staggered_rc_permits <- merge(
+  nj_all_updated,
+  rent_dates2,
+  by.x = "Place_Name_Clean",
+  by.y = "nj_all_match",
+  all.x = TRUE
+)
+# intensity_rc_panel <- merge(
+#   nj_all_updated,
+#   rent_control_intensity,
+#   by.x = "Place_Name_Clean",
+#   by.y = "nj_all_match",
+#   all.x = TRUE
+# )
+
+staggered_rc_permits$treatment_year = ifelse(is.na(staggered_rc_permits$treatment_year), 0, staggered_rc_permits$treatment_year)
+table(staggered_rc_permits$treatment_year)
+staggered_rc_permits_ag <- staggered_rc_permits %>%
+  group_by(Place_Name_Clean, Year) %>%
+  summarise(
+    single_family_sum = sum(single_family, na.rm = TRUE),
+    single_family_mean = mean(single_family, na.rm = TRUE),
+    multi_family_sum = sum(multi_family, na.rm = TRUE),
+    multi_family_mean = mean(multi_family, na.rm = TRUE),
+    treatment_year = as.numeric(first(treatment_year)),
+    first_treatment_year = as.numeric(first(first_treatment_year)),
+    last_treatment_year = as.numeric(first(last_treatment_year)),
+    first_post_2000_treatment_year = as.numeric(first(first_post_2000_treatment_year)),
+    treatment_count = as.numeric(first(treatment_count)),
+    county = first(County_Code),
+    msa = first(MSA._CMSA),
+    central_city = as.factor(first(Central_City)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    treatment_year = ifelse(is.na(treatment_year), 0, treatment_year),
+    first_treatment_year = ifelse(is.na(first_treatment_year), 0, first_treatment_year),
+    first_post_2000_treatment_year = ifelse(is.na(first_post_2000_treatment_year), 0, first_post_2000_treatment_year),
+    last_treatment_year = ifelse(is.na(last_treatment_year), 0, last_treatment_year),
+    treatment_count = ifelse(is.na(treatment_count), 0, treatment_count),
+    treated = ifelse(treatment_year > 0,T,F),
+    year_num = as.numeric(Year),
+    id = as.numeric(factor(Place_Name_Clean))
+  )
+table(staggered_rc_permits_ag$treatment_year)
+
+staggered_rc_permits_ag <- staggered_rc_permits_ag %>%
+  filter(!is.na(treatment_year))
+
+staggered_rc_permits_ag <- staggered_rc_permits_ag %>%
+  group_by(Place_Name_Clean, Year) %>%
+  mutate(log_mf_mean = log(multi_family_mean + 1),
+         log_mf_sum = log(multi_family_sum + 1),
+         log_sf_mean = log(single_family_mean + 1),
+         log_sf_sum = log(single_family_sum + 1)) %>%
   ungroup()
 
-nrow(nj_survey_filtered)
-# Merge both datasets with crosswalk to get nj_all_match
-rent_control_intensity <- merge(
-  rent_control_intensity, nj_crosswalk,
-  by.x = "Municipality_Clean", by.y = "rent_control_name", all.x = TRUE
-)
-nrow(rent_control_intensity)
+invalid_munis <- nj %>%
+  filter(is.na(RentControl)) %>%
+  mutate(Municipality_Clean = str_to_lower(str_trim(Municipality))) %>%
+  pull(Municipality_Clean)
+invalid_munis
+# union city
+staggered_rc_permits_ag <- staggered_rc_permits_ag %>%
+  filter(!Place_Name_Clean %in% invalid_munis)%>%
+  arrange(Place_Name_Clean,Year)
 
-nj_survey_filtered <- merge(
-  nj_survey_filtered, nj_crosswalk,
-  by.x = "Municipality_Clean", by.y = "rent_control_name", all.x = TRUE
+table(staggered_rc_permits_ag$treatment_year)
+nrow(staggered_rc_permits_ag)
+staggered_rc_permits_ag <- merge(staggered_rc_permits_ag, nj_muni_df,by.x = "Place_Name_Clean", by.y="Municipality_Clean")
+nrow(staggered_rc_permits_ag)
+
+ggplot(staggered_rc_permits_ag %>% filter(Place_Name_Clean=="belleville township"), 
+       aes(x = year_num, y = multi_family_sum, color = treated)) +
+  stat_summary(fun = mean, geom = "line") +
+  labs(title = "Pre-Treatment Trends", y = "Log Multi-Family Permits")
+
+
+hist(log(staggered_rc_permits_ag$multi_family_sum/staggered_rc_permits_ag$SQ_MILES+1))
+staggered_rc_permits_ag$multi_family_sq_mile <- log(staggered_rc_permits_ag$multi_family_sum/staggered_rc_permits_ag$SQ_MILES+1)
+
+staggered_rc_permits_ag %>%
+  mutate(treated_this_year = year_num >= treatment_year & treatment_year > 0) %>%
+  group_by(Year) %>%
+  summarise(
+    n_true = sum(treated_this_year, na.rm = TRUE),
+    total = n(),
+    share_true = 100 * n_true / total
+  ) %>%
+  print(n = 100)
+
+ggplot(staggered_rc_permits_ag %>% filter(first_treatment_year < 2000| first_treatment_year == 0), 
+       aes(x = year_num, y = log_sf_sum, color = treated)) +
+  stat_summary(fun = mean, geom = "line") +
+  labs(title = "Pre-Treatment Trends", y = "Log Multi-Family Permits")
+
+ggplot(staggered_rc_permits_ag, 
+       aes(x = year_num, y = multi_family_sq_mile, color = treated)) +
+  stat_summary(fun = mean, geom = "line") +
+  labs(title = "Multi-Family Permits per Square Mile", y = "Log MF Permits/Sq Mile")
+
+ggplot(staggered_rc_permits_ag %>% 
+         filter(first_post_2000_treatment_year > year_num),
+       aes(x = year_num, y = log_mf_sum, color = as.factor(first_post_2000_treatment_year))) +
+  stat_summary(fun = mean, geom = "line") +
+  labs(title = "Pre-Treatment MF Trends by Treatment Year", color = "First Treatment Year")
+
+names(staggered_rc_permits_ag)
+att_gt_out <- att_gt(
+  yname = "multi_family_sq_mile",
+  tname = "year_num",
+  idname = "id",
+  gname = "first_post_2000_treatment_year",
+  data = staggered_rc_permits_ag,
+  panel = F,
+  xformla = ~MUN_TYPE.x,
+  control_group = "notyettreated",
+  est_method = "dr"
 )
-nrow(nj_survey_filtered)
+
+dynamic_att <- aggte(att_gt_out, type = "dynamic",na.rm = TRUE)
+summary(dynamic_att)
+ggdid(dynamic_att)
+beep()
+
+
+#### continous/staggered ----
+
 
 # Merge rent_control_intensity and nj_survey_filtered into a single dataset
 # Data gets weird here
 rc_combined <- merge(
-  rent_control_intensity, nj_survey_filtered,
+  rent_control_intensity, rent_dates2,
   by = "Municipality_Clean", suffixes = c("_rc", "_dates")
 )
 
 nrow(rc_combined)
 
+plot(log(rc_combined$treatment_count),rc_combined$rent_control_unweighted)
+summary(lm(rent_control_unweighted ~ log(treatment_count)+factor(year),rc_combined))
 
-nj_all_updated %>%
-  group_by(Place_Name_Clean) %>%
-  summarise(
-    n_years = n_distinct(Year),
-    min_year = min(Year, na.rm = TRUE),
-    max_year = max(Year, na.rm = TRUE)
-  ) %>%
-  ungroup() %>%
-  count(n_years) %>%
-  arrange(desc(n_years))
+
+##### Exploring timing by city ----
+sampled_munis <- rc_combined %>%
+  filter(!is.na(RentControl) & first_post_2000_treatment_year > 2000) %>%
+  slice_sample(n = 6) %>%
+  pull(Municipality_Clean)
+
+# Filter panel data to those municipalities
+explore_df <- staggered_rc_permits_ag %>%
+  filter(Place_Name_Clean %in% sampled_munis)
+
+# Match rent control dates to each municipality
+rentcontrol_dates <- rc_combined %>%
+  select(Municipality_Clean, RentControl) %>%
+  mutate(
+    RentControl_Parsed = map(RentControl, function(x) {
+      if (is.na(x) || str_trim(x) == "") return(NA_Date_)
+      parsed <- suppressWarnings(ymd(str_split(x, ";")[[1]]))
+      parsed[!is.na(parsed) & parsed > ymd("2000-01-01")]
+    })
+  )
+
+plots <- map(sampled_munis, function(muni) {
+  muni_data <- explore_df %>% filter(Place_Name_Clean == muni)
+  dates <- rentcontrol_dates %>%
+    filter(Municipality_Clean == muni) %>%
+    pull(RentControl_Parsed) %>%
+    .[[1]]
+  
+  base_plot <- ggplot(muni_data, aes(x = year_num, y = multi_family_sum)) +
+    geom_line(color = "steelblue") +
+    geom_point() +
+    labs(
+      title = str_to_title(muni),
+      x = "Year", y = "Multi-Family Permits"
+    ) +
+    theme_minimal()
+  
+  # Add one geom_vline per date (if any)
+  if (!is.null(dates) && length(dates) > 0) {
+    base_plot <- reduce(
+      dates,
+      .init = base_plot,
+      .f = function(p, d) p + geom_vline(xintercept = year(d), linetype = "dashed", color = "red")
+    )
+  }
+  
+  base_plot
+})
+print(p)
+# Print them one by one
+for (p in plots) print(p)
 
 # Join to nj_all only once
 con_stag <- merge(
@@ -549,22 +715,240 @@ con_stag <- merge(
   by.x = "Place_Name_Clean", by.y = "nj_all_match_rc", all.x = TRUE
 )
 
-con_stag %>%
-  group_by(Place_Name_Clean) %>%
-  summarise(
-    n_years = n_distinct(Year),
-    min_year = min(Year, na.rm = TRUE),
-    max_year = max(Year, na.rm = TRUE)
-  ) %>%
-  ungroup() %>%
-  count(n_years) %>%
-  arrange(desc(n_years))
 
-# Convert treatment year to numeric
-con_stag$treatment_year <- as.numeric(format(con_stag$latest_pre2022_ordinance_date, "%Y"))
-treated_df <- con_stag %>%
-  # filter(!is.na(latest_ordinance_date)) %>%
-  mutate(treatment_year = year(latest_pre2022_ordinance_date))
+rc_events <- con_stag %>%
+  select(Place_Name_Clean, RentControl) %>%
+  filter(!is.na(RentControl)) %>%
+  mutate(RentControlDate = str_split(RentControl, ";")) %>%
+  unnest(RentControlDate) %>%
+  mutate(RentControlDate = ymd(RentControlDate)) %>%
+  filter(RentControlDate >= ymd("2000-01-01"))%>%
+  filter(!is.na(RentControlDate)) %>%
+  mutate(RentControlYear = year(RentControlDate)) %>%
+  distinct(Place_Name_Clean, RentControlYear)
+
+# Step 2: Join to con_stag and compute event time in years
+con_stag_events <- con_stag %>%
+  inner_join(rc_events, by = "Place_Name_Clean", relationship = "many-to-many") %>%
+  mutate(
+    Year = as.numeric(Year),
+    RentControlYear = as.numeric(RentControlYear),
+    years_since_rc = Year - RentControlYear
+  ) %>%
+  filter(years_since_rc >= -20, years_since_rc <= 20)
+
+# Step 3: Aggregate mean log(multi_family) by event year
+agg_effects <- con_stag_events %>%
+  filter(!is.na(multi_family)) %>%
+  group_by(years_since_rc) %>%
+  summarise(mean_log_mf = mean(log1p(multi_family), na.rm = TRUE)) %>%
+  arrange(years_since_rc)
+print(agg_effects,n=100)
+# Step 4: Plot
+ggplot(agg_effects, aes(x = years_since_rc, y = mean_log_mf)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point(color = "steelblue", size = 2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(
+    title = "Average Multi-Family Permits by Years Since Rent Control",
+    x = "Years Since Rent Control Implementation",
+    y = "Mean Log(Multi-Family Permits)"
+  )
+ggplot(agg_effects, aes(x = years_since_rc, y = mean_log_mf)) +
+  geom_line() +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Avg Log(MF Permits) by Years Since Rent Control Adoption",
+       x = "Years Since Rent Control", y = "Mean log1p(MF Permits)") +
+  theme_minimal()
+
+summary(fixest::feols(log1p(multi_family) ~ i(years_since_rc, ref = -1)*factor(rent_control_unweighted) | Place_Name_Clean + Year, data = con_stag_events))
+
+con_stag_events <- con_stag_events %>%
+  mutate(rc_intensity_group = ifelse(rent_control_unweighted >= .5, "High", "Low"))
+
+# Run separate models
+feols(log1p(multi_family) ~ i(years_since_rc, ref = -1) | Place_Name_Clean + Year,
+      data = filter(con_stag_events, rc_intensity_group == "High")) %>%
+  summary()
+
+feols(log1p(multi_family) ~ i(years_since_rc, ref = -1) | Place_Name_Clean + Year,
+      data = filter(con_stag_events, rc_intensity_group == "Low")) %>%
+  summary()
+
+con_stag_events <- con_stag_events %>%
+  mutate(rc_intensity_high = rent_control_unweighted >= median(rent_control_unweighted, na.rm = TRUE))
+
+feols(log1p(multi_family) ~ i(years_since_rc, rc_intensity_group, ref = -1) | Place_Name_Clean + Year,
+               data = con_stag_events)%>%
+  summary()
+
+# Aggregate mean permits by event time and intensity group
+agg_plot_df <- con_stag_events %>%
+  filter(!is.na(multi_family)) %>%
+  group_by(years_since_rc, rc_intensity_group) %>%
+  summarise(mean_log_mf = mean(log1p(multi_family), na.rm = TRUE), .groups = "drop")
+print(agg_plot_df,n=100)
+# Plot
+ggplot(agg_plot_df, aes(x = years_since_rc, y = mean_log_mf, color = rc_intensity_group)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(
+    title = "Mean Log(Multi-Family Permits) Around Rent Control Adoption",
+    x = "Years Since Rent Control",
+    y = "Mean log(1 + Multi-Family Permits)",
+    color = "RC Intensity"
+  ) +
+  theme_minimal()
+
+con_stag %>%
+  filter(!is.na(rent_control_unweighted), !is.na(first_treatment_year)) %>%
+  mutate(pre2000 = first_treatment_year < 2000) %>%
+  group_by(pre2000) %>%
+  summarise(
+    mean_rci = mean(rent_control_unweighted, na.rm = TRUE),
+    median_rci = median(rent_control_unweighted, na.rm = TRUE),
+    n = n()
+  )
+ggplot(con_stag %>% filter(!is.na(rent_control_unweighted), !is.na(first_treatment_year)), 
+       aes(x = factor(first_treatment_year < 2000), y = rent_control_unweighted)) +
+  geom_boxplot() +
+  labs(x = "Adopted Before 2000", y = "Rent Control Intensity",
+       title = "RCI Comparison: Pre- vs Post-2000 Adopters")
+
+
+# Step 1
+
+amendment_counts_normalized <- con_stag %>%
+  select(Place_Name_Clean, RentControl) %>%
+  filter(!is.na(RentControl)) %>%
+  distinct() %>%
+  mutate(
+    dates_list = map(RentControl, ~ suppressWarnings(ymd(str_split(.x, ";")[[1]]))),
+    dates_list = map(dates_list, ~ .x[!is.na(.x)]),
+    first_date = map_dbl(dates_list, ~ if (length(.x) == 0) NA_real_ else min(.x, na.rm = TRUE) %>% as.numeric()),
+    amendment_count = map2_int(dates_list, first_date, ~ sum(.x > as.Date(.y, origin = "1970-01-01"))),
+    first_date_actual = as.Date(first_date, origin = "1970-01-01"),
+    years_active = 2022 - year(first_date_actual),
+    amendment_count_per_year = ifelse(years_active > 0, amendment_count / years_active, NA_real_)
+  ) %>%
+  select(Place_Name_Clean, amendment_count, years_active, amendment_count_per_year)
+
+print(as_tibble(amendment_counts_normalized), n = 100)
+
+rent_control_summary <- con_stag %>%
+  filter(!is.na(first_treatment_year), !is.na(rent_control_unweighted)) %>%
+  mutate(pre2000 = first_treatment_year < 2000) %>%
+  distinct(Place_Name_Clean, pre2000,rent_control_unweighted, cap_numeric, cpi_tied, units_covered, sf_exempt,
+           new_construction_exempt, hardship_appeals)
+
+amendment_summary <- rent_control_summary %>%
+  left_join(amendment_counts_normalized, by = "Place_Name_Clean") %>%
+  group_by(pre2000) %>%
+  summarise(
+    mean_amendments = mean(amendment_count, na.rm = TRUE),
+    median_amendments = median(amendment_count, na.rm = TRUE),
+    n = n(),
+    mean_amendments_norm = mean(amendment_count_per_year, na.rm = TRUE)
+  )
+
+print(amendment_summary)
+# Summarize by pre-/post-
+rent_control_summary %>%
+  group_by(pre2000) %>%
+  summarise(across(c(rent_control_unweighted,cap_numeric, cpi_tied, units_covered, sf_exempt,
+                     new_construction_exempt, hardship_appeals), ~mean(.x, na.rm = TRUE)))
+
+amendment_rci_df <- amendment_counts %>%
+  left_join(rent_control_summary %>% select(Place_Name_Clean, rent_control_unweighted), by = c("Place_Name_Clean"))
+
+summary(lm(rent_control_unweighted ~ amendment_count, data = amendment_rci_df))
+
+top_amenders <- amendment_counts %>%
+  arrange(desc(amendment_count)) %>%
+  slice_head(n = 10)
+
+con_stag %>%
+  filter(Place_Name_Clean %in% top_amenders$Place_Name_Clean) %>%
+  pivot_longer(cols = c(RentIncreaseLimit, Exemptions, UnitsStructure, VacancyIncrease, VacancyControl, 
+                        HardshipIncreases, CapitalImprovements, AdministrativeProcedures, EvictionControls,
+                        RegistrationRequirements, FeeSchedules, ExpirationOrSunset, Definitions),
+               names_to = "Component", values_to = "Dates") %>%
+  filter(!is.na(Dates)) %>%
+  count(Place_Name_Clean, Component, sort = TRUE) %>%
+  group_by(Place_Name_Clean) %>%
+  top_n(3, wt = n) %>%
+  arrange(Place_Name_Clean)%>%
+  print(n=100)
+
+# hollowed_repealed_flags <- con_stag %>%
+#   distinct(Place_Name_Clean, repealed_year, units_covered, cap_numeric, rent_control_unweighted) %>%
+#   mutate(
+#     repealed = !is.na(repealed_year),
+#     hollowed_out = units_covered < 0.25 | cap_numeric > 10 | rent_control_unweighted < 0.2
+#   )
+# 
+# table(hollowed_repealed_flags$repealed, hollowed_repealed_flags$hollowed_out)
+
+date_cols <- c(
+  "RentControl", "RentIncreaseLimit", "Exemptions", "UnitsStructure",
+  "VacancyIncrease", "VacancyControl", "HardshipIncreases", "CapitalImprovements",
+  "AdministrativeProcedures", "EvictionControls", "RegistrationRequirements",
+  "FeeSchedules", "ExpirationOrSunset", "Definitions"
+)
+
+timeline_data <- con_stag %>%
+  select(Municipality_Clean, all_of(date_cols)) %>%
+  pivot_longer(cols = -Municipality_Clean, names_to = "Component", values_to = "Dates") %>%
+  filter(!is.na(Dates)) %>%
+  mutate(Date = str_split(Dates, ";")) %>%
+  unnest(Date) %>%
+  mutate(Date = ymd(str_trim(Date))) %>%
+  filter(!is.na(Date))
+
+selected_cities <- c("newark city", "jersey city", "hoboken city", "asbury park city", "montclair township")
+
+timeline_data %>%
+  filter(Municipality_Clean %in% selected_cities) %>%
+  ggplot(aes(x = Date, y = fct_rev(Component), color = Component)) +
+  geom_point() +
+  facet_wrap(~ str_to_title(Municipality_Clean), scales = "free_y") +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Rent Control Policy Timelines by City",
+    x = "Date of Ordinance",
+    y = "Policy Component"
+  ) +
+  theme(legend.position = "none")
+
+
+pre2000_rc_events <- con_stag %>%
+  filter(!is.na(RentControl)) %>%
+  distinct(Place_Name_Clean, RentControl) %>%
+  filter(Place_Name_Clean %in% rent_control_summary$Place_Name_Clean[rent_control_summary$pre2000]) %>%
+  mutate(
+    amendment_dates = map(RentControl, ~ suppressWarnings(ymd(str_split(.x, ";")[[1]]))),
+    amendment_dates = map(amendment_dates, ~ .x[!is.na(.x) & .x >= ymd("2000-01-01")])
+  ) %>%
+  unnest(amendment_dates) %>%
+  distinct(Place_Name_Clean, amendment_date = amendment_dates)
+
+amendment_event_panel <- con_stag %>%
+  filter(Place_Name_Clean %in% pre2000_rc_events$Place_Name_Clean) %>%
+  inner_join(pre2000_rc_events, by = "Place_Name_Clean",relationship = "many-to-many") %>%
+  mutate(years_since_amendment = as.numeric(Year) - amendment_year) %>%
+  filter(years_since_amendment >= -5, years_since_amendment <= 10)
+
+library(fixest)
+summary(
+  feols(
+    log1p(multi_family) ~ i(years_since_amendment, ref = -1) | Place_Name_Clean + Year,
+    data = amendment_event_panel
+  )
+)%>%summary()
+
+
+
 
 names(treated_df)
 nrow(treated_df)

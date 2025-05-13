@@ -32,6 +32,7 @@ def pick_hyphen_year(a_str, b_str):
     return min(b_years)
 
 def extract_dates(text):
+
     # 1) Full dates anywhere
     date_pattern = r'\b(?:\d{1,2}[/-]){2}\d{2,4}\b'
     full_dates = []
@@ -115,15 +116,24 @@ SECTION_MAP = [
     (re.compile(r'^\d+-4(?:\.\d+)*\b'),   "RentControl"),
     (re.compile(r'^\d+-1\.2\b'),          "Exemptions"),
     (re.compile(r'^\d+-2\.2\b'),          "VacancyIncrease"),
-    (re.compile(r'^\d+-2(?:\.1)?\b'),     "RentIncreaseLimit"),  # 2 and 2.1
+    (re.compile(r'^\d+-2(?:\.1)?\b'),     "RentIncreaseLimit"),  
 ]
 
 cats = {
-    'RentControl':       r'rent control|rent stabili|rent leveling|Powers\s*of\s*Board',
-    'RentIncreaseLimit': r'\b(?:Rental\s*Increase|Vacancy\s*Increase|Maximum\s*Rent\s*Increase|Annual\s*Increase|increase\s*allowed|allowable\s*percentage\s*increase|rent\s*increase)\b',
-    'Exemptions':        r'\b(?:Exemptions|Exceptions?|Exclusions?|Waivers?|Vacancy\s*Decontrol)\b',
-    'UnitsStructure':    r'\b(?:Units\s*in\s*Structure|Covered\s*Units|Dwelling\s*Units|Building\s*Units)\b',
-    'VacancyIncrease':   r'\b(?:Termination\s+of\s+occupancy|Vacancy\s+increase|Vacancy\s*Decontrol)\b'
+    'RentControl':         r'rent control|rent stabili|rent leveling|Powers\s*of\s*Board',
+    'RentIncreaseLimit':   r'\b(?:Rental\s*Increase|Vacancy\s*Increase|Maximum\s*Rent\s*Increase|Annual\s*Increase|increase\s*allowed|allowable\s*percentage\s*increase|rent\s*increase)\b',
+    'Exemptions':          r'\b(?:Exemptions|Exceptions?|Exclusions?|Waivers?|Vacancy\s*Decontrol)\b',
+    'UnitsStructure':      r'\b(?:Units\s*in\s*Structure|Covered\s*Units|Dwelling\s*Units|Building\s*Units)\b',
+    'VacancyIncrease':     r'\b(?:Termination\s+of\s+occupancy|Vacancy\s+increase|Vacancy\s*Decontrol)\b',
+    'VacancyControl':      r'\b(?:vacancy\s+control|vacancy\s+decontrol|vacancy\s+adjustment|vacancy\s+rent|new\s+tenancy\s+rent)\b',
+    'HardshipIncreases':   r'\b(?:hardship|fair\s+return|insufficient\s+return|net\s+operating\s+income|NOI)\b',
+    'CapitalImprovements': r'\b(?:capital\s+improvement|major\s+repairs|building\s+upgrade|rehabilitation\s+costs?)\b',
+    'AdministrativeProcedures': r'\b(?:hearing\s+officer|Rent\s+Control\s+Board|enforcement\s+officer|board\s+of\s+adjustment|appeals?)\b',
+    'EvictionControls':    r'\b(?:just\s+cause\s+eviction|eviction\s+controls?|cause\s+for\s+termination|grounds\s+for\s+eviction)\b',
+    'RegistrationRequirements': r'\b(?:unit\s+registration|annual\s+registration|filing\s+requirement|landlord\s+registration)\b',
+    'FeeSchedules':        r'\b(?:registration\s+fee|administrative\s+fee|filing\s+fee|per\s+unit\s+fee)\b',
+    'ExpirationOrSunset':  r'\b(?:sunset\s+provision|expiration\s+date|temporary\s+ordinance|review\s+period)\b',
+    'Definitions':         r'\bdefinitions\b'
 }
 
 HISTORY_BLOCKS = [
@@ -150,63 +160,78 @@ def determine_key_from_heading(sec_no, heading):
 
     return None
 
-def collect_amendments(text: str) -> dict[str, list[int]]:
-    # prepare output buckets
+def collect_amendments(text):
     out = {col: [] for col in cats}
+    out["UnmatchedSections"] = []
 
-    # 1) grab ANY top‑level history blocks into RentControl
-    for pat in HISTORY_BLOCKS:
-        for blk in re.findall(pat, text, flags=re.IGNORECASE|re.DOTALL):
-            out['RentControl'].append(blk)
+    history_and_ords = re.findall(
+        r"\[[^\]]*(?:HISTORY:|Editor's Note:|Prior ordinance history|Ord\.\s*No\.|Ordinance Nos?\.)[^\]]*\]",
+        text, flags=re.IGNORECASE | re.DOTALL
+    )
+    for blk in set(history_and_ords):
+        if 'Ordinance Nos' in blk:
+            for left, right in re.findall(r'(\d{1,4})\s*[-–:]\s*(\d{1,4})', blk):
+                year = pick_hyphen_year(left, right)
+                if year:
+                    out['RentControl'].append(f"{year}-01-01")
+        else:
+            out['RentControl'].extend(extract_dates(blk))
 
-    # 2) split into §‑sections
     sections = find_sections(text)
-
-    # 3) walk each section, assign it a key (with numeric→keyword→inherit logic)
-    current_parent = None
     for heading, body in sections:
-        # pull out the “13-2” part
+        key = None
+        sec_no = None  # ← ensure it's defined
         m = re.match(r'§\s*([\d.-]+)', heading)
-        sec_no = m.group(1) if m else None
+        if m:
+            sec_no = m.group(1)
+            for pat, cat in SECTION_MAP:
+                if pat.match(sec_no):
+                    key = cat
+                    break
 
-        # if this is a top‑level §X (no dot) and its heading matches RentControl,
-        # remember it as the current “parent” for inheritance
-        if sec_no and '.' not in sec_no:
-            if re.search(cats['RentControl'], heading, re.IGNORECASE):
-                current_parent = 'RentControl'
-            else:
-                current_parent = None
-
-        # determine this section’s bucket
-        key = determine_key_from_heading(sec_no, heading)
-
-        # if still nothing, inherit from parent
-        if not key and current_parent:
-            key = current_parent
+        if key is None:
+            for col, pat in cats.items():
+                if re.search(pat, heading, flags=re.IGNORECASE):
+                    key = col
+                    break
 
         if not key:
+            out["UnmatchedSections"].append(f"{sec_no or '?'}: {heading.strip()}")
             continue
 
-        # 4) pull out every [… ] in this section’s body
         for blk in re.findall(r'\[[^\]]+\]', body):
             out[key].append(blk)
 
-    # 5) finally run every collected block through extract_dates()
     parsed = {}
     for col, blks in out.items():
-        dates = []
+        if col == "UnmatchedSections":
+            parsed[col] = sorted(set(blks))
+            continue
+
+        existing_dates = [d for d in blks if re.match(r"\d{4}-\d{2}-\d{2}", d)]
+        more_dates = []
         for blk in blks:
-            dates += extract_dates(blk)
-        parsed[col] = sorted(set(dates), reverse=True)
+            if not re.match(r"\d{4}-\d{2}-\d{2}", blk):
+                more_dates += extract_dates(blk)
+        all_dates = existing_dates + more_dates
+        parsed[col] = sorted(set(all_dates), reverse=True)
 
     return parsed
 
-
+    
 print("Loading Excel file…")
 df = pd.read_excel('NJ_Rent_Control_Survey_scrape.xlsx', engine='openpyxl')
+for col in cats:
+    if col not in df.columns:
+        df[col] = ""
+if "UnmatchedSections" not in df.columns:
+    df["UnmatchedSections"] = ""
+    
 df.columns = df.columns.str.strip()
 assert 'Rent Control Ordinance' in df.columns
 #elmwood_df = df[df['Municipality'] == 'Elmwood Park Borough']
+#woodland_df = df[df['Municipality'] == 'Woodland Park Borough']
+
 for i, row in df.iterrows():
     muni = row['Municipality']
     url  = row['Rent Control Ordinance']
@@ -219,6 +244,7 @@ for i, row in df.iterrows():
     text = BeautifulSoup(resp.text, 'html.parser').get_text("\n", strip=True)
 
     by_cat = collect_amendments(text)
+    #print(by_cat)
     for col, dates in by_cat.items():
         df.at[i, col] = ";".join(dates)
 
@@ -229,6 +255,24 @@ empty_str_count = (df['RentControl'].fillna('').str.strip() == '').sum()
 print(f"Missing RentControl entries (NaN): {na_count}")
 print(f"Missing RentControl entries (empty string): {empty_str_count}")
 
-df.to_excel('rent_control_raw_dates_by_city.xlsx', index=False)
-print("\nDone! Wrote rent_control_raw_dates_by_city.xlsx")
+unmatched_cols = [
+    'Municipality', 'County', 'Rent Control Office/Board', 'Rent Control Ordinance', 'UnmatchedSections'
+]
+matched_cols = [
+    'Municipality', 'County', 'Rent Control Office/Board', 'Rent Control Ordinance'
+] + list(cats.keys())
+
+# Split out unmatched rows
+only_unmatched = df[
+    (df["UnmatchedSections"].str.strip() != "") &
+    (df[list(cats.keys())].apply(lambda row: all(cell.strip() == "" for cell in row.fillna("")), axis=1))
+]
+
+# Write unmatched sections to separate file
+only_unmatched[unmatched_cols].to_excel("unmatched_sections.xlsx", index=False)
+print(f"Wrote {len(only_unmatched)} rows with only unmatched sections to unmatched_sections.xlsx")
+
+# Drop unmatched sections column from main file and write
+df[matched_cols].to_excel('rent_control_raw_dates_by_city.xlsx', index=False)
+print("Done! Wrote rent_control_raw_dates_by_city.xlsx")
 
