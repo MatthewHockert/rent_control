@@ -156,7 +156,7 @@ nj_all_updated <- nj_all %>%
       tolower(Place_Name_Clean) %in% c("princeton township", "princeton borough") ~ "princeton",
       tolower(Place_Name_Clean) %in% c("west paterson borough") ~ "woodland park borough",
       tolower(Place_Name_Clean) %in% c("pahaquarry township") ~ "hardwick township",
-      tolower(Place_Name_Clean) %in% c("dover township") ~ "toms river township",
+      tolower(Place_Name_Clean) %in% c("dover township") & County_Code == 29 ~ "toms river township",
       tolower(Place_Name_Clean) %in% c("south belmar borough") ~ "lake como borough",
       tolower(Place_Name_Clean) %in% c("pine valley borough") ~ "pine hill borough",
       tolower(Place_Name_Clean) %in% c("toms river town") ~ "toms river township",
@@ -173,6 +173,14 @@ nj_all_updated <- nj_all_updated %>%
 
 nj_all_updated <- nj_all_updated %>%
   filter(Year < 2025)
+
+nj_all_updated <- nj_all_updated %>%
+  group_by(Place_Name_Clean) %>%
+  mutate(across(
+    c(State_Code, Place_ID, County_Code, Place_Code, MSA._CMSA, PMSA_Code, Central_City),
+    ~ ifelse(.x == 0 & any(.x != 0, na.rm = TRUE), max(.x[.x != 0], na.rm = TRUE), .x)
+  )) %>%
+  ungroup()
 
 nj_all_updated %>%
   #filter(Year >= 2010, Year <= 2015) %>%
@@ -485,6 +493,7 @@ table(staggered_rc_permits_ag$treatment_year, useNA = "ifany")
 
 
  ##### V2 ----
+
 library(lubridate)
 
 rent_dates <- readxl::read_excel("../rent_control_raw_dates_by_city.xlsx")
