@@ -7,12 +7,15 @@ library(dplyr)
 library(stringr)
 library(lubridate)
 library(purrr)
+library(arrow)
 
 nj_crosswalk <- read.csv('../NJ_Municipality_Crosswalk.csv')
 nj_county_city_crosswalk <- read_excel('../nj_county_city_crosswalk.xlsx')
 
 dewey_rental_micro <- read.csv('../sample_dewey.csv')
 names(dewey_rental_micro)
+
+df <- read_parquet("../places_annual-2.parquet")
 
 nj_permits <- read.csv(
   "/Users/matthewhockert/Desktop/Personal Info/rent_control/downloads/Northeast_Region/ne9311y.txt",
@@ -30,10 +33,12 @@ read_permit_file <- function(path) {
   header2 <- strsplit(lines[2], ",")[[1]]
   
   # Combine headers: use header2 where header1 is blank
+  header1 <- strsplit(lines[1], ",")[[1]]
+  header2 <- strsplit(lines[2], ",")[[1]]
   merged_headers <- ifelse(header1 == "", header2, paste0(header1, "_", header2))
-  merged_headers <- gsub("\\s+", "_", merged_headers) # replace whitespace
-  merged_headers <- gsub("\\.+", ".", merged_headers) # collapse repeated dots
-  merged_headers <- make.names(merged_headers, unique = TRUE)
+  merged_headers <- gsub("[^a-zA-Z0-9]+", "_", merged_headers)
+  merged_headers <- gsub("_+", "_", merged_headers)
+  merged_headers <- gsub("_$", "", merged_headers)
   
   df <- read.csv(path, skip = 2, header = FALSE, stringsAsFactors = FALSE)
   
@@ -47,18 +52,18 @@ read_permit_file <- function(path) {
 }
 
 # Load files
-files <- list.files(folder_path, pattern = "y\\.txt$", full.names = TRUE)
+files <- list.files(folder_path, pattern = "c\\.txt$", full.names = TRUE)
 nj_data_list <- lapply(files, read_permit_file)
 
 # Get union of all column names
 all_cols <- unique(unlist(lapply(nj_data_list, names)))
 
 # Standardize columns across all files
-nj_data_list <- lapply(nj_data_list, function(df) {
-  for (col in setdiff(all_cols, names(df))) df[[col]] <- NA
-  df <- df[all_cols]
-  return(df)
-})
+# nj_data_list <- lapply(nj_data_list, function(df) {
+#   for (col in setdiff(all_cols, names(df))) df[[col]] <- NA
+#   df <- df[all_cols]
+#   return(df)
+# })
 
 nj_data_list <- lapply(nj_data_list, function(df) {
   for (col in setdiff(all_cols, names(df))) df[[col]] <- NA
@@ -502,7 +507,7 @@ table(staggered_rc_permits_ag$treatment_year, useNA = "ifany")
 
 library(lubridate)
 
-rent_dates <- readxl::read_excel("../rent_control_raw_dates_by_city.xlsx")
+rent_dates <- readxl::read_excel("../rent_control_raw_dates_by_city2.xlsx")
 
 rent_dates2 <- rent_dates %>%
   mutate(
@@ -521,6 +526,22 @@ rent_dates2 <- rent_dates %>%
     treatment_count = map_int(RentControl_Parsed, ~ length(unique(year(.))))
   )%>%
   select(-RentControl_Parsed)
+
+# rent_dates_clean <- rent_dates2 %>%
+#   mutate(RentControl = str_replace_all(RentControl, "\\s+", "")) %>%
+#   separate_rows(RentControl, sep = ";") %>%
+#   filter(!is.na(RentControl), RentControl != "") %>%
+#   mutate(
+#     RentControl = case_when(
+#       RentControl == "28058" ~ NA_character_,
+#       RentControl == "August12,2013" ~ "2013-08-12",
+#       RentControl == "3-8-2021" ~ "2021-03-08",
+#       str_detect(RentControl, "^\\d{1,2}/\\d{1,2}/\\d{4}$") ~ as.character(mdy(RentControl)),
+#       str_detect(RentControl, "^\\d{4}-\\d{2}-\\d{2}$") ~ RentControl,
+#       str_detect(RentControl, "^\\d{4}$") ~ paste0(RentControl, "-01-01"),
+#       TRUE ~ suppressWarnings(as.character(mdy(RentControl)))
+#     )
+#   )
 
 rent_dates2 <- merge(rent_dates2, nj_crosswalk,
                     by.x = "Municipality_Clean",
