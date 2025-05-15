@@ -5,10 +5,11 @@ library(sf)
 #### muni shapes ----
 nj_muni_shape <- st_read("../NJ_Municipal_Boundaries_3424_2278012401268357461")
 #nj_muni_shape$geometry <- st_centroid(nj_muni_shape$geometry)
-nj_muni_shape <- select(nj_muni_shape,c("NAME","MUN_TYPE","SQ_MILES","geometry"))
+nj_muni_shape <- select(nj_muni_shape,c("NAME","COUNTY","MUN_TYPE","SQ_MILES","geometry"))
 #st_write(nj_muni_shape,"nj_muni_shape.shp",append=F)
 nj_muni_shape <- nj_muni_shape %>%
-  mutate(Municipality_Clean = str_to_lower(str_trim(NAME)))
+  mutate(Municipality_Clean = str_to_lower(str_trim(NAME)),
+         County_Name = str_to_title(str_trim(COUNTY)))
 
 nj_muni_df <- st_drop_geometry(nj_muni_shape)
 

@@ -9,6 +9,7 @@ library(lubridate)
 library(purrr)
 
 nj_crosswalk <- read.csv('../NJ_Municipality_Crosswalk.csv')
+nj_county_city_crosswalk <- read_excel('../nj_county_city_crosswalk.xlsx')
 
 dewey_rental_micro <- read.csv('../sample_dewey.csv')
 names(dewey_rental_micro)
@@ -150,6 +151,10 @@ nj_all <- nj_all %>%
     )
   )
 
+nrow(nj_all)
+nj_all <- merge(nj_all,nj_county_city_crosswalk,by="County_Code")
+#nrow(test)
+
 nj_all_updated <- nj_all %>%
   mutate(
     Place_Name_Clean = case_when(
@@ -165,11 +170,12 @@ nj_all_updated <- nj_all %>%
     )
   ) %>%
   group_by(Place_Name_Clean, Date, Year) %>%
-  summarise(across(where(is.numeric), ~ sum(.x, na.rm = TRUE)), .groups = "drop")
+  summarise(across(where(is.numeric), ~ sum(.x, na.rm = TRUE)),
+            County_Name = first(County_Name),.groups = "drop")
 
 names(nj_all_updated)
 nj_all_updated <- nj_all_updated %>%
-  select(1:12, CBSA_Code, multi_family, single_family)
+  select(1:12, CBSA_Code,County_Name, multi_family, single_family)
 
 nj_all_updated <- nj_all_updated %>%
   filter(Year < 2025)
@@ -724,6 +730,8 @@ con_stag <- merge(
   by.x = "Place_Name_Clean", by.y = "nj_all_match_rc", all.x = TRUE
 )
 
+colSums(is.na(nj_all_updated))
+colSums(is.na(con_stag))
 
 rc_events <- con_stag %>%
   select(Place_Name_Clean, RentControl) %>%
