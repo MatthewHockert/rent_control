@@ -4,6 +4,7 @@ library(data.table)
 library(dplyr)
 library(stringdist)
 library(fuzzyjoin)
+library(sf)
 nj_counties <- st_read('../cb_2024_us_county_500k')
 nj_counties <- filter(nj_counties,STATEFP=="34")
 msa <- st_read("../cb_2024_us_metdiv_500k")
@@ -189,3 +190,147 @@ city_population_matched <- best_matches %>%
 #,relationship = "many-to-many"
 
 
+nj_1980_pop_cs <- read_csv("../nhgis0013_csv/nhgis0013_ds104_1980_cty_sub.csv")
+nj_1980_pop_cs <- filter(nj_1980_pop_cs,STATEA == "34")
+names(nj_1980_pop_cs)
+nj_1980_pop_cs$population_1980_cs <- nj_1980_pop_cs$C7L001
+nj_1980_pop_cs$population_1980_cs
+
+nj_1980_pop_place <- read_csv("../nhgis0013_csv/nhgis0013_ds104_1980_place.csv")
+nj_1980_pop_place <- filter(nj_1980_pop_place,STATEA == "34")
+nj_1980_pop_place$population_1980_places <- nj_1980_pop_place$C7L001
+
+nj_1990_pop_cs <- read_csv("../nhgis0013_csv/nhgis0013_ds120_1990_cty_sub.csv")
+nj_1990_pop_cs <- filter(nj_1990_pop_cs,STATEA == "34")
+names(nj_1990_pop_cs)
+nj_1990_pop_cs$population_1990_cs <- nj_1990_pop_cs$ET1001
+nj_1990_pop_cs$population_1990_cs
+
+nj_1990_pop_place <- read_csv("../nhgis0013_csv/nhgis0013_ds120_1990_place.csv")
+nj_1990_pop_place <- filter(nj_1990_pop_place,STATEA == "34")
+nj_1990_pop_place$population_1980_places <- nj_1990_pop_place$ET1001
+nj_1990_pop_place$population_1980_places
+
+names(nj_1980_pop_cs)
+names(nj_1980_pop_place)
+names(nj_1990_pop_cs)
+names(nj_1990_pop_place)
+
+
+nj_1980_cs <- nj_1980_pop_cs %>%
+  transmute(
+    GISJOIN,
+    COUNTY,
+    AREANAME,
+    STATEA,
+    YEAR = 1980,
+    geography_type = "county_subdivision",
+    population = C7L001
+  )
+
+# 1980 Place
+nj_1980_place <- nj_1980_pop_place %>%
+  transmute(
+    GISJOIN,
+    COUNTY = COUNTYA,
+    AREANAME,
+    STATEA,
+    YEAR = 1980,
+    geography_type = "place",
+    population = C7L001
+  )
+
+# 1990 County Subdivision
+nj_1990_cs <- nj_1990_pop_cs %>%
+  transmute(
+    GISJOIN,
+    COUNTY,
+    AREANAME = CTY_SUB,  # No AREANAME in 1990 cs, use CTY_SUBA as proxy
+    STATEA,
+    YEAR = 1990,
+    geography_type = "county_subdivision",
+    population = ET1001
+  )
+
+# 1990 Place
+nj_1990_place <- nj_1990_pop_place %>%
+  transmute(
+    GISJOIN,
+    COUNTY= COUNTYA,
+    AREANAME = PLACE,  # No AREANAME in 1990 place, use PLACEA
+    STATEA,
+    YEAR = 1990,
+    geography_type = "place",
+    population = ET1001
+  )
+
+# Bind all together
+nj_pop_all <- bind_rows(nj_1980_cs, nj_1980_place, nj_1990_cs, nj_1990_place)
+
+nj_pop_all <- nj_pop_all %>%
+  mutate(
+    Place_Name_Clean = str_to_lower(AREANAME),                                 # lowercase
+    Place_Name_Clean = str_replace_all(Place_Name_Clean, "[^a-z0-9\\s-]", ""),   # remove non-alphanumeric except dash and space
+    Place_Name_Clean = str_replace_all(Place_Name_Clean, "\\s+", " "),           # normalize whitespace
+    Place_Name_Clean = str_trim(Place_Name_Clean),                               # trim leading/trailing space
+    Place_Name_Clean = str_replace_all(Place_Name_Clean, "\\b(cdp)\\b", ""),  # drop suffixes
+    Place_Name_Clean = str_replace(Place_Name_Clean, "(?<=\\bcity) city\\b", ""),
+    Place_Name_Clean = str_replace_all(Place_Name_Clean, "\\s+", " "),           # re-trim space after removal
+    Place_Name_Clean = str_trim(Place_Name_Clean)                                # final trim
+  )
+
+print(unique(nj_pop_all$Place_Name_Clean))
+
+nj_pop_all_cleaned <- nj_pop_all %>%
+  group_by(Place_Name_Clean, population, YEAR, STATEA) %>%
+  mutate(
+    keep = case_when(
+      n() > 1 & any(geography_type == "county_subdivision") ~
+        if_else(geography_type == "county_subdivision", TRUE, FALSE),
+      TRUE ~ TRUE
+    )
+  ) %>%
+  ungroup() %>%
+  filter(keep) %>%
+  select(-keep)
+
+
+city_pop_names <- unique(city_population_matched$Place_Name_Clean)
+city_pop_names
+
+nj_pop_all2 <- filter(nj_pop_all_cleaned, Place_Name_Clean %in% city_pop_names)
+nj_pop_all2 %>%
+  group_by(YEAR) %>%
+  summarise(n_unique_places = n_distinct(Place_Name_Clean),
+            count = length(Place_Name_Clean))
+
+nj_pop_all2 %>%
+  group_by(YEAR, Place_Name_Clean) %>%
+  summarise(n = n(), counties = n_distinct(COUNTY), .groups = "drop") %>%
+  filter(n > 1 | counties > 1)%>%
+  print(n=100)
+
+nj_pop_all2 <- nj_pop_all2 %>%
+  mutate(expand = case_when(
+    YEAR == 1980 ~ 10,
+    YEAR == 1990 ~ 10,
+    TRUE ~ 1
+  )) %>%
+  uncount(weights = expand) %>%
+  group_by(GISJOIN, YEAR) %>%
+  mutate(Year = if (unique(YEAR) == 1980) 1980:1989 else if (unique(YEAR) == 1990) 1990:1999 else YEAR) %>%
+  ungroup() 
+
+
+nj_pop_all3 <- nj_pop_all2 %>%
+  select(-GISJOIN) %>%
+  rename(County_Name = COUNTY)%>%
+  bind_rows(
+    city_population_matched %>%
+      transmute(
+        Place_Name_Clean,
+        County_Name,
+        Year = as.numeric(Year),
+        population
+      )
+  )

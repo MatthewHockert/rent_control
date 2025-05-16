@@ -100,19 +100,33 @@ nj_data_list <- lapply(nj_data_list, function(df) {
 # Final bind and cleanup
 nj_all <- bind_rows(nj_data_list)
 beep()
+
+
 # Optional fixes for character formatting
+# nj_all2 <- nj_all %>%
+#   mutate(
+#     Zip_Code = as.character(Zip_Code),
+#     Survey_Date = as.character(Survey_Date),
+#     Date = as.Date(sapply(Survey_Date, parse_survey_date), origin = "1970-01-01"),
+#     Year = format(Date, "%Y")
+#   )
+nj_all <- filter(nj_all, State_Code == "34")
 nj_all2 <- nj_all %>%
   mutate(
     Zip_Code = as.character(Zip_Code),
     Survey_Date = as.character(Survey_Date),
-    Date = as.Date(sapply(Survey_Date, parse_survey_date), origin = "1970-01-01"),
-    Year = format(Date, "%Y")
+    Date = as.Date(sapply(Survey_Date, parse_survey_date)),
+    Date = `names<-`(Date, NULL),
+    Year = as.numeric(format(Date, "%Y"))
   )
-
+print(unique(nj_all2$Year))
 beep()
 
+nj_all2 %>%
+  filter(Place_Name == "Woodland Park Borough") %>%
+  pull(Year) %>%
+  range()
 
-nj_all2 <- filter(nj_all2, State_Code == "34")
 nj_all2 <- nj_all2 %>%
   rename(
     Place_ID = X6_Digit_ID,
@@ -155,7 +169,8 @@ nj_all2 <- nj_all2 %>%
 names(nj_all)
 
 clean_place_name <- function(x) {
-  x <- gsub("\\.+", "", x)             # remove all periods
+  x <- gsub("\\.+", "", x)           # remove all periods
+  x <- gsub("#", "", x) 
   x <- trimws(x)                       # remove leading/trailing whitespace
   x <- stringr::str_to_lower(x)        # capitalize first letter of each word
   return(x)
@@ -164,15 +179,15 @@ nj_all2 <- nj_all2 %>%
   mutate(
     Place_Name_Clean = clean_place_name(Place_Name)
   )
-
-nj_all2 <- nj_all2 %>%
-  mutate(
-    Place_Name_Clean = Place_Name_Clean,
-    Place_Name_Clean = gsub("\\.+", "", Place_Name_Clean),     # remove periods
-    Place_Name_Clean = gsub("#", "", Place_Name_Clean),        # remove stray hash symbols
-    Place_Name_Clean = str_trim(Place_Name_Clean),             # trim whitespace
-    Place_Name_Clean = str_to_title(Place_Name_Clean)          # capitalize each word
-  )
+# 
+# nj_all2 <- nj_all2 %>%
+#   mutate(
+#     Place_Name_Clean = Place_Name_Clean,
+#     Place_Name_Clean = gsub("\\.+", "", Place_Name_Clean),     # remove periods
+#     Place_Name_Clean = gsub("#", "", Place_Name_Clean),        # remove stray hash symbols
+#     Place_Name_Clean = str_trim(Place_Name_Clean),             # trim whitespace
+#     Place_Name_Clean = str_to_title(Place_Name_Clean)          # capitalize each word
+#   )
 
 
 nj_all2 <- nj_all2 %>% filter(!is.na(Date))
@@ -226,9 +241,42 @@ nj_all_updated <- nj_all_updated %>%
   )) %>%
   ungroup()
 
+nrow(nj_all_updated)
+nj_all_updated <- nj_all_updated %>%
+  mutate(month = month(Date)) %>%
+  filter(month == 12)
+nrow(nj_all_updated)
+
+
+nj_all_updated %>%
+  group_by(Place_Name_Clean, Date) %>%
+  filter(n() > 1) %>%
+  summarise(dup_count = n(), .groups = "drop")
+
+nj_all_updated %>%
+  filter(Place_Name_Clean == "Newark", Year == "1998") %>%
+  select(Place_Name_Clean, Date, single_family, multi_family)
+
+nj_all_updated %>%
+  filter(Place_Name_Clean == "Newark",Year == "2006") %>%
+  duplicated() %>%
+  sum()
+
+nj_all_updated %>%
+  filter(Place_Name_Clean == "Newark", Year == "2006") %>%
+  group_by(Year) %>%
+  summarise(n_obs = n(),
+            sf_units = sum(single_family, na.rm = TRUE),
+            mf_units = sum(multi_family, na.rm = TRUE))
+
+#follows a cummulative pattern
+nj_all_updated <- nj_all_updated %>%
+  mutate(Year2 = format(Date, "%Y"))
+
 nj_all_updated %>%
   #filter(Year >= 2010, Year <= 2015) %>%
   filter(grepl("newark", Place_Name_Clean, ignore.case = TRUE)) %>%
+  filter(Place_Name_Clean != "East Newark Borough") %>%
   group_by(Place_Name_Clean, Year) %>%
   summarise(mf_units = sum(multi_family, na.rm = TRUE), .groups = "drop") %>%
   ggplot(aes(x= Year, y = mf_units, group = Place_Name_Clean, color = Place_Name_Clean)) +
@@ -547,19 +595,27 @@ rent_dates2 <- rent_dates %>%
     Municipality_Clean = str_to_lower(str_trim(Municipality)),
     RentControl_Parsed = map(RentControl, function(x) {
       if (is.na(x) || str_trim(x) == "") return(NA_Date_)
-      dates <- suppressWarnings(ymd(str_split(x, ";")[[1]]))
+      raw_parts <- str_split(x, ";")[[1]]
+      parsed_dates <- map_chr(raw_parts, function(date_str) {
+        date_str <- str_trim(date_str)
+        if (str_detect(date_str, "^\\d{4}$")) paste0(date_str, "-01-01") else date_str
+      })
+      dates <- suppressWarnings(ymd(parsed_dates))
       dates[!is.na(dates)]
     }),
     first_treatment_year = map_int(RentControl_Parsed, ~ if (all(is.na(.))) NA_integer_ else year(min(., na.rm = TRUE))),
+    first_amendment_year = map_int(RentControl_Parsed, function(d) {
+      if (length(d) < 2) NA_integer_
+      else year(sort(d)[2])
+    }),
     last_treatment_year = map_int(RentControl_Parsed, ~ if (all(is.na(.))) NA_integer_ else year(max(., na.rm = TRUE))),
     first_post_2000_treatment_year = map_int(RentControl_Parsed, function(d) {
       post2000 <- d[d > ymd("2000-01-01")]
       if (length(post2000) == 0) NA_integer_ else year(min(post2000))
     }),
     treatment_count = map_int(RentControl_Parsed, ~ length(unique(year(.))))
-  )%>%
+  ) %>%
   select(-RentControl_Parsed)
-
 # rent_dates_clean <- rent_dates2 %>%
 #   mutate(RentControl = str_replace_all(RentControl, "\\s+", "")) %>%
 #   separate_rows(RentControl, sep = ";") %>%
@@ -580,7 +636,7 @@ rent_dates2 <- merge(rent_dates2, nj_crosswalk,
                     by.x = "Municipality_Clean",
                     by.y = "rent_control_name", all.x = TRUE)
 
-rent_dates2$treatment_year <- year(rent_dates2$RentControl)
+# rent_dates2$treatment_year <- year(as.numeric(rent_dates2$RentControl))
 
 
 staggered_rc_permits <- merge(

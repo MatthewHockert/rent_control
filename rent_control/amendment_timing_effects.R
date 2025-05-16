@@ -5,6 +5,8 @@ con_stag <- merge(
   rc_combined,
   by.x = "Place_Name_Clean", by.y = "nj_all_match_rc", all.x = TRUE
 )
+print(con_stag%>% subset(Place_Name_Clean == "woodland park borough"))
+
 nrow(con_stag)
 # --- Step 1: Aggregate con_stag to yearly ---
 con_stag_year <- con_stag %>%
@@ -36,6 +38,7 @@ con_stag_year <- con_stag %>%
     ExpirationOrSunset = first(ExpirationOrSunset),
     Definitions = first(Definitions),
     first_treatment_year = first(first_treatment_year),
+    first_amendment_year = first(first_amendment_year),
     County_Name = first(County_Name),
     .groups = "drop"
   ) %>%
@@ -48,12 +51,33 @@ con_stag_year <- con_stag %>%
 nrow(con_stag_year)
 # print(unique(con_stag_year$Place_Name_Clean))
 # print(unique(city_population_by_year$Place_Name_Clean))
-names(which(table(con_stag_year$Place_Name_Clean) != 25))
+names(which(table(con_stag_year$Place_Name_Clean) != 37))
 #colSums(is.na(con_stag_year))
 
-con_stag_year_pop <- merge(con_stag_year,city_population_matched,by=c("Place_Name_Clean","County_Name","Year"))
+
+con_stag_year %>%
+  #filter(Year >= 2010, Year <= 2015) %>%
+  filter(grepl("newark", Place_Name_Clean, ignore.case = TRUE)) %>%
+  filter(Place_Name_Clean != "East Newark Borough") %>%
+  group_by(Place_Name_Clean, Year) %>%
+  summarise(mf_units = sum(multi_family_sum, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x= Year, y = mf_units, group = Place_Name_Clean, color = Place_Name_Clean)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "",
+    x = "Year",
+    y = "Multifamily Units",
+    color = "Place Name"
+  ) +
+  theme_minimal()
+
+nrow(con_stag_year)
+# con_stag_year_pop <- con_stag_year
+con_stag_year_pop <- merge(con_stag_year,nj_pop_all3,by=c("Place_Name_Clean","County_Name","Year"))
 nrow(con_stag_year_pop)
 names(which(table(con_stag_year_pop$Place_Name_Clean) != 25))
+
 
 con_stag_year_pop <- con_stag_year_pop %>%
   group_by(Place_Name_Clean, Year) %>%
@@ -76,19 +100,21 @@ con_stag_year_pop <- con_stag_year_pop %>%
 hist(con_stag_year_pop$mf_permits_per_1000)
 hist(con_stag_year_pop$mf_log_permits_per_1000)
 
+nrow(con_stag_year_pop)
 con_stag_year2 <- merge(con_stag_year_pop, nj_muni_df,by.x = c("Place_Name_Clean",'County_Name'), by.y=c("Municipality_Clean",'County_Name'))
 nrow(con_stag_year2)
 names(which(table(con_stag_year2$Place_Name_Clean) != 25))
 
-con_stag_year2 %>%
-  filter(adoption_group == "Post-2000") %>%
-  distinct(Place_Name_Clean, first_treatment_year) %>%
-  count(first_treatment_year) 
 
-ggplot(con_stag_year2, aes(x = Year, y = mf_log_permits_per_1000, group=factor(adoption_group), color = factor(adoption_group))) +
+# con_stag_year2 %>%
+#   filter(adoption_group == "Post-2000") %>%
+#   distinct(Place_Name_Clean, first_treatment_year) %>%
+#   count(first_treatment_year) 
+
+ggplot(con_stag_year2, aes(x = Year, y = mf_log_permits_per_1000,group=adoption_group, color = adoption_group)) +
   stat_summary(fun = mean, geom = "line", size = 1.2) +
   labs(
-    title = "Multifamily Development Trends",
+    title = "Single Family Development Trends",
     subtitle = "Comparison of pre-2000, post-2000, and never-treated",
     x = "Year",
     y = "mf_log_permits_per_1000",
@@ -96,6 +122,26 @@ ggplot(con_stag_year2, aes(x = Year, y = mf_log_permits_per_1000, group=factor(a
   ) +
   theme_minimal() +
   theme(legend.position = "top")
+
+con_stag_long <- con_stag_year2 %>%
+  pivot_longer(
+    cols = c(mf_log_permits_per_1000, sf_log_permits_per_1000),
+    names_to = "unit_type",
+    values_to = "permits"
+  )
+
+ggplot(con_stag_long, aes(x = Year, y = permits, color = unit_type, group = unit_type)) +
+  stat_summary(fun = mean, geom = "line", size = 1.2) +
+  labs(
+    title = "Single-Family vs Multi-Family Development Trends",
+    subtitle = "Mean annual permits by type",
+    x = "Year",
+    y = "Permits",
+    color = "Unit Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
 
 con_stag_year2%>%
   group_by(MUN_TYPE)%>%
@@ -146,8 +192,14 @@ cs_data <- con_stag_year2 %>%
   mutate(
     time = as.numeric(Year),
     G = G,
-    Y = mf_log_permits_per_1000
+    Y = sf_log_permits_per_1000
   )
+
+cs_data <- cs_data %>%
+  arrange(Place_Name_Clean,Year)%>%
+  group_by(Place_Name_Clean)%>%
+  mutate(event_time = ifelse(G > 0, Year - G, NA_integer_))%>%
+  filter(is.na(event_time) | (event_time >= -10 & event_time <= 10),G!=1990)
 
 table(table(cs_data$id))
 table(cs_data$G)
@@ -168,13 +220,12 @@ att_gt_results <- att_gt(
   tname = "time",
   idname = "id",
   gname = "G",
-  xformla = ~ County_Name + MUN_TYPE,
-  control_group = "notyettreated",
+  xformla = ~ County_Name + MUN_TYPE + size_bin,
+  control_group = "nevertreated",
   data = cs_data,
   #panel = T,
   allow_unbalanced_panel = T,
-  est_method = "reg",
-  anticipation = 4
+  est_method = "reg"
 )
 
 es_results <- aggte(att_gt_results, type = "dynamic",na.rm = TRUE)
@@ -195,53 +246,84 @@ library(dplyr)
 library(stringr)
 
 # Extract enactment and amendment years from RentControl
-# Create rent timing table
-
-rent_timing <- con_stag_year2 %>%
-  select(Place_Name_Clean, RentControl) %>%
-  filter(!is.na(RentControl)) %>%
-  mutate(
-    Place_Name_Clean = as.character(Place_Name_Clean),
-    years = str_extract_all(RentControl, "\\d{4}"),
-    years = lapply(years, function(x) sort(as.integer(unique(x)))),
-    first_treatment_year = sapply(years, function(x) if (length(x) >= 1) x[1] else NA_integer_),
-    first_amendment_year = sapply(years, function(x) if (length(x) >= 2) x[2] else NA_integer_),
-    years_between = first_amendment_year - first_treatment_year
-  ) %>%
-  select(Place_Name_Clean, first_treatment_year, first_amendment_year, years_between)%>%
-  distinct(Place_Name_Clean,first_treatment_year,first_amendment_year,years_between)%>%
-  filter(first_treatment_year > 2000)
-
-rent_timing %>%
-  filter(!is.na(years_between), years_between >= 0) %>%
-  summarise(avg_years_between = mean(years_between))
-names(cs_data)
-names(rent_timing)
 
 cs_data_filtered <- cs_data %>%
-  left_join(rent_timing, by = "Place_Name_Clean") %>%
-  filter(
-    is.na(G) | G == 0 | Year <= (first_amendment_year-1)
-  )
+  arrange(Place_Name_Clean,Year)%>%
+  group_by(Place_Name_Clean)%>%
+  # Only keep never-treated or treated after 2000
+  filter(G == 0 | (G >2000 & !is.na(first_amendment_year))) %>%
+  # For treated units, drop years after the first amendment
+  filter(G == 0 | Year <= (first_amendment_year - 1))%>%
+  mutate(event_time = ifelse(G > 0, Year - G, NA_integer_))%>%
+  filter(is.na(event_time) | (event_time >= -10 & event_time <= 10))
 
-print(unique(cs_data_filtered$G))
+cs_data_filtered <- cs_data %>%
+  arrange(Place_Name_Clean, Year) %>%
+  group_by(Place_Name_Clean) %>%
+  filter(adoption_group %in% c("Pre-2000", "Post-2000")) %>%
+  filter(
+    adoption_group == "Pre-2000" |
+      (adoption_group == "Post-2000" & Year <= (first_amendment_year - 1))
+  ) %>%
+  mutate(
+    G = if_else(adoption_group == "Pre-2000", 0L, G),
+    event_time = if_else(G > 0, Year - G, NA_integer_)
+  )%>%
+filter(is.na(event_time) | (event_time >= -10 & event_time <= 10))
+table(cs_data_filtered$G == 0, useNA = "always")
+
+table(cs_data_filtered$time < cs_data_filtered$G, useNA = "always")
+table(cs_data_filtered$G, cs_data_filtered$time < cs_data_filtered$G)
+
+max(cs_data_filtered$event_time,na.rm=T)
+cs_data_filtered %>%
+  group_by(id) %>%
+  summarise(
+    n_years = n_distinct(time),
+    min_year = min(time),
+    max_year = max(time),
+    G = first(G)
+  ) %>%
+  ungroup() %>%
+  filter(G > 0, min_year < G) %>%
+  summarise(
+    avg_years = mean(n_years),
+    min_years = min(n_years),
+    max_years = max(n_years)
+  )
+table(cs_data_filtered$G == 0, useNA = "always")
+table(cs_data_filtered$time - cs_data_filtered$G)
+
+cs_data_filtered %>%
+  filter(!is.na(event_time), G > 0) %>%
+  count(event_time) %>%
+  ggplot(aes(x = event_time, y = n)) +
+  geom_col() +
+  labs(title = "Number of Treated Units by Event Time",
+       x = "Event Time", y = "Number of Units")
+
 
 att_gt_first_stage <- att_gt(
-  yname = "sf_log_permits_per_1000",
+  yname = "Y",
   tname = "time",
   idname = "id",
   gname = "G",
-  xformla = ~ County_Name + MUN_TYPE,
-  control_group = "notyettreated",
+  xformla = ~ County_Name + MUN_TYPE + size_bin,
+  control_group = "nevertreated",
   data = cs_data_filtered,
+  panel=T,
   allow_unbalanced_panel = TRUE,
   est_method = "reg",
-  anticipation=1
-)
+  anticipation = 1
+  )
 
 es_results_first_stage <- aggte(att_gt_first_stage, type = "dynamic", na.rm = TRUE)
 summary(es_results_first_stage)
 ggdid(es_results_first_stage)
+
+
+
+
 
 #### Bacon decomp ----
 all_ids <- unique(cs_data$id)
