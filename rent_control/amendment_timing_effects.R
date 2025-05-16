@@ -5,7 +5,7 @@ con_stag <- merge(
   rc_combined,
   by.x = "Place_Name_Clean", by.y = "nj_all_match_rc", all.x = TRUE
 )
-
+nrow(con_stag)
 # --- Step 1: Aggregate con_stag to yearly ---
 con_stag_year <- con_stag %>%
   group_by(Place_Name_Clean, Year) %>%

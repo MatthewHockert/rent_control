@@ -9,6 +9,10 @@ library(lubridate)
 library(purrr)
 library(arrow)
 
+
+### Cross walks ----
+nj_permits_csv <- read.csv('/Users/matthewhockert/Downloads/NJ_Construction_Permit_Data_20250515.csv')
+
 nj_crosswalk <- read.csv('../NJ_Municipality_Crosswalk.csv')
 nj_county_city_crosswalk <- read_excel('../nj_county_city_crosswalk.xlsx')
 
@@ -27,21 +31,38 @@ library(ggplot2)
 
 folder_path <- "/Users/matthewhockert/Desktop/Personal Info/rent_control/downloads/Northeast_Region"
 
+parse_survey_date <- function(x) {
+  if (is.na(x)) return(NA)
+  x <- as.character(x)
+  n <- nchar(x)
+  
+  if (n == 4) {
+    year <- as.integer(substr(x, 1, 2))
+    month <- as.integer(substr(x, 3, 4))
+    full_year <- ifelse(year >= 80, 1900 + year, 2000 + year)
+    return(as.Date(sprintf("%04d-%02d-01", full_year, month)))
+  } else if (n == 6) {
+    return(as.Date(paste0(x, "01"), format = "%Y%m%d"))
+  } else {
+    return(NA)
+  }
+}
+
+
 read_permit_file <- function(path) {
   lines <- readLines(path, n = 2)
-  header1 <- strsplit(lines[1], ",")[[1]]
-  header2 <- strsplit(lines[2], ",")[[1]]
   
   # Combine headers: use header2 where header1 is blank
   header1 <- strsplit(lines[1], ",")[[1]]
   header2 <- strsplit(lines[2], ",")[[1]]
   merged_headers <- ifelse(header1 == "", header2, paste0(header1, "_", header2))
+  merged_headers <- make.names(merged_headers, unique = TRUE)
   merged_headers <- gsub("[^a-zA-Z0-9]+", "_", merged_headers)
   merged_headers <- gsub("_+", "_", merged_headers)
   merged_headers <- gsub("_$", "", merged_headers)
   
   df <- read.csv(path, skip = 2, header = FALSE, stringsAsFactors = FALSE)
-  
+  if ("Zip_Code" %in% names(df)) df$Zip_Code <- as.character(df$Zip_Code)
   # Pad headers if too short
   if (length(merged_headers) < ncol(df)) {
     merged_headers <- c(merged_headers, paste0("Extra_", seq_len(ncol(df) - length(merged_headers))))
@@ -52,7 +73,7 @@ read_permit_file <- function(path) {
 }
 
 # Load files
-files <- list.files(folder_path, pattern = "c\\.txt$", full.names = TRUE)
+files <- list.files(folder_path, pattern = "y\\.txt$", full.names = TRUE)
 nj_data_list <- lapply(files, read_permit_file)
 
 # Get union of all column names
@@ -78,72 +99,84 @@ nj_data_list <- lapply(nj_data_list, function(df) {
 
 # Final bind and cleanup
 nj_all <- bind_rows(nj_data_list)
-
+beep()
 # Optional fixes for character formatting
-nj_all <- nj_all %>%
+nj_all2 <- nj_all %>%
   mutate(
     Zip_Code = as.character(Zip_Code),
     Survey_Date = as.character(Survey_Date),
-    Date = as.Date(paste0(Survey_Date, "01"), format = "%Y%m%d"),
+    Date = as.Date(sapply(Survey_Date, parse_survey_date), origin = "1970-01-01"),
     Year = format(Date, "%Y")
   )
 
-nj_all <- filter(nj_all, State_Code == "34")
-nj_all <- nj_all %>%
+beep()
+
+
+nj_all2 <- filter(nj_all2, State_Code == "34")
+nj_all2 <- nj_all2 %>%
   rename(
-    Place_ID = X6.Digit_ID,
+    Place_ID = X6_Digit_ID,
     Months_Reported = Number_of_Months_Rep,
     
     # Permits (non-representative sample)
     Bldgs_1U = Bldgs,
-    Units_1U = X1.unit_Units,
+    Units_1U = X1_unit_Units,
     Value_1U = Value,
     
-    Bldgs_2U = Bldgs.1,
-    Units_2U = X2.units_Units,
-    Value_2U = Value.1,
+    Bldgs_2U = Bldgs_1,
+    Units_2U = X2_units_Units,
+    Value_2U = Value_1,
     
-    Bldgs_3_4U = Bldgs.2,
-    Units_3_4U = X3.4_units_Units,
-    Value_3_4U = Value.2,
+    Bldgs_3_4U = Bldgs_2,
+    Units_3_4U = X3_4_units_Units,
+    Value_3_4U = Value_2,
     
-    Bldgs_5U = Bldgs.3,
-    Units_5U = X5._units_Units,
-    Value_5U = Value.3,
+    Bldgs_5U = Bldgs_3,
+    Units_5U = X5_units_Units,
+    Value_5U = Value_3,
     
     # Representative sample
-    Bldgs_1U_Rep = Bldgs.4,
-    Units_1U_Rep = X1.unit_rep_Units,
-    Value_1U_Rep = Value.4,
+    Bldgs_1U_Rep = Bldgs_4,
+    Units_1U_Rep = X1_unit_rep_Units,
+    Value_1U_Rep = Value_4,
     
-    Bldgs_2U_Rep = Bldgs.5,
-    Units_2U_Rep = X2.units_rep_Units,
-    Value_2U_Rep = Value.5,
+    Bldgs_2U_Rep = Bldgs_5,
+    Units_2U_Rep = X2_units_rep_Units,
+    Value_2U_Rep = Value_5,
     
-    Bldgs_3_4U_Rep = Bldgs.6,
-    Units_3_4U_Rep = X3.4_units_rep_Units,
-    Value_3_4U_Rep = Value.6,
+    Bldgs_3_4U_Rep = Bldgs_6,
+    Units_3_4U_Rep = X3_4_units_rep_Units,
+    Value_3_4U_Rep = Value_6,
     
-    Bldgs_5U_Rep = Bldgs.7,
-    Units_5U_Rep = X5._units_rep_Units
+    Bldgs_5U_Rep = Bldgs_7,
+    Units_5U_Rep = X5_units_rep_Units
   )
 
 names(nj_all)
 
-nj_all$Date <- as.Date(paste0(nj_all$Survey_Date, "01"), format = "%Y%m%d")
-nj_all$Year <- format(nj_all$Date, "%Y")
+clean_place_name <- function(x) {
+  x <- gsub("\\.+", "", x)             # remove all periods
+  x <- trimws(x)                       # remove leading/trailing whitespace
+  x <- stringr::str_to_lower(x)        # capitalize first letter of each word
+  return(x)
+}
+nj_all2 <- nj_all2 %>%
+  mutate(
+    Place_Name_Clean = clean_place_name(Place_Name)
+  )
 
-nj_all <- nj_all %>%
-  mutate(Name = gsub("\\.+", "", Place_Name),
-         Name = gsub("#", "", Place_Name),
-         Name = str_trim(Place_Name),
-         Name = str_to_title(Place_Name))
+nj_all2 <- nj_all2 %>%
+  mutate(
+    Place_Name_Clean = Place_Name_Clean,
+    Place_Name_Clean = gsub("\\.+", "", Place_Name_Clean),     # remove periods
+    Place_Name_Clean = gsub("#", "", Place_Name_Clean),        # remove stray hash symbols
+    Place_Name_Clean = str_trim(Place_Name_Clean),             # trim whitespace
+    Place_Name_Clean = str_to_title(Place_Name_Clean)          # capitalize each word
+  )
 
-nj_all <- nj_all %>%
-  mutate(Place_Name_Clean = str_to_lower(str_trim(Place_Name)))
 
-nj_all <- nj_all %>% filter(!is.na(Date))
-nj_all <- nj_all %>%
+nj_all2 <- nj_all2 %>% filter(!is.na(Date))
+nj_all2 <- nj_all2 %>%
   mutate(
     single_family = as.numeric(Units_1U),
     multi_family = rowSums(
@@ -156,11 +189,11 @@ nj_all <- nj_all %>%
     )
   )
 
-nrow(nj_all)
-nj_all <- merge(nj_all,nj_county_city_crosswalk,by="County_Code")
-#nrow(test)
+nrow(nj_all2)
+nj_allx <- merge(nj_all2,nj_county_city_crosswalk,by="County_Code")
+nrow(nj_allx)
 
-nj_all_updated <- nj_all %>%
+nj_all_updated <- nj_allx %>%
   mutate(
     Place_Name_Clean = case_when(
       tolower(Place_Name_Clean) %in% c("princeton township", "princeton borough") ~ "princeton",
@@ -188,14 +221,14 @@ nj_all_updated <- nj_all_updated %>%
 nj_all_updated <- nj_all_updated %>%
   group_by(Place_Name_Clean) %>%
   mutate(across(
-    c(State_Code, Place_ID, County_Code, Place_Code, MSA._CMSA, PMSA_Code, Central_City),
+    c(State_Code, Place_ID, County_Code, Place_Code, MSA_CMSA, PMSA_Code, Central_City),
     ~ ifelse(.x == 0 & any(.x != 0, na.rm = TRUE), max(.x[.x != 0], na.rm = TRUE), .x)
   )) %>%
   ungroup()
 
 nj_all_updated %>%
   #filter(Year >= 2010, Year <= 2015) %>%
-  filter(grepl("Woodbridge Township", Place_Name_Clean, ignore.case = TRUE)) %>%
+  filter(grepl("newark", Place_Name_Clean, ignore.case = TRUE)) %>%
   group_by(Place_Name_Clean, Year) %>%
   summarise(mf_units = sum(multi_family, na.rm = TRUE), .groups = "drop") %>%
   ggplot(aes(x= Year, y = mf_units, group = Place_Name_Clean, color = Place_Name_Clean)) +
