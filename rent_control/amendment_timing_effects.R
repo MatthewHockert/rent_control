@@ -143,6 +143,36 @@ ggplot(con_stag_long, aes(x = Year, y = permits, color = unit_type, group = unit
   theme(legend.position = "top")
 
 
+ggplot(con_stag_year2 %>% filter(Place_Name_Clean %in% c("newark", "jersey city","hoboken","cape may point borough")), aes(x = Year, y = mf_permits_per_1000, color = Place_Name_Clean, group = Place_Name_Clean)) +
+  stat_summary(fun = mean, geom = "line", size = 1.2) +
+  labs(
+    title = "Multi-Family Permitting Trends",
+    subtitle = "Mean annual permits by city per 1000 people",
+    x = "Year",
+    y = "Permits",
+    color = "Unit Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+zero_mf <- con_stag_year2 %>%
+  group_by(Place_Name_Clean) %>%
+  summarize(
+    total_years = n(),
+    zero_years = sum(mf_permits_per_1000 == 0, na.rm = TRUE)
+  ) %>%
+  filter(zero_years == total_years)
+
+zero_permits <-con_stag_year2 %>%
+  group_by(Place_Name_Clean) %>%
+  summarize(
+    total_years = n(),
+    zero_mf = sum(mf_permits_per_1000 == 0, na.rm = TRUE),
+    zero_sf = sum(sf_permits_per_1000 == 0, na.rm = TRUE)
+  ) %>%
+  filter(zero_mf == total_years & zero_sf == total_years)
+
+
 con_stag_year2%>%
   group_by(MUN_TYPE)%>%
   summarise(mean_miles = mean(SQ_MILES,na.rm=T))

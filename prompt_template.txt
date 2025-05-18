@@ -1,24 +1,52 @@
-he following rent control policy text is from {Municipality}, New Jersey:
+The following rent control policy text is from {Municipality}, New Jersey:
 
 Rent Increase Limit: "{Rent_Increase_Limit}"
 Exceptions: "{Exceptions}"
 
-Based on this information, please answer:
-1. What is the maximum allowed rent increase (numeric or CPI-tied)?
-    - Treat "0.05" as 5%.
-    - The lower the allowed increase, the more restrictive the policy.
-2. Are single-family or small multifamily homes exempt?
-3. Is rent increase tied to inflation (CPI)?
-4. Are new constructions exempt?
-5. Are hardship appeals allowed?
+Please evaluate this rent control policy by answering the following questions. Respond in JSON format using a 0 to 1 scale, where 1 means **most restrictive** (strong tenant protections) and 0 means **least restrictive** (landlord-friendly).
 
-Respond in JSON format with a score from 0 to 1 for each item, where 1 = most restrictive.
-Use this JSON structure:
+Questions:
+
+1. **max_rent_increase**: What is the maximum annual rent increase? 
+   - Return a number between 0 and 1 based on how strict the cap is.
+   - A 0% increase = 1.0 (most restrictive); 10% or higher = 0.0 (least restrictive).
+   - Use intermediate values for anything in between.
+   - If the cap is CPI-tied, use 0.5. If no cap is found, assume 0.0.
+
+2. **sf_exempt**: Are single-family homes exempt from rent control?
+   - Return 1.0 if single-family homes are **not exempt**..
+   - Return 0.0 if **any sf or single family exemptions** are mentioned.
+   - Use 0.5 if ambiguous or partial.
+   - Example: If the law applies to all units regardless of structure type, return 1.0.
+
+3. **cpi_tied**: Is the *base* rent increase explicitly tied to CPI?
+   - Ignore vacancy decontrol CPI references.
+   - Return 1.0 if the main rent cap is fixed (not CPI-tied).
+   - Return 0.0 if the cap is CPI-tied.
+
+4. **new_construction_exempt**: Are newly constructed units exempt from rent control?
+   - Return 1.0 if **new construction is covered** (most restrictive).
+   - Return 0.0 if **new construction is exempt**.
+   - Use 0.5 if unclear.
+
+5. **hardship_appeals**: Are landlords allowed to request rent increases above the cap for hardship or financial reasons?
+   - Return 1.0 if **no hardship appeals are allowed** (most restrictive).
+   - Return 0.0 if **hardship appeals are explicitly allowed**.
+   - Use 0.5 if unclear.
+
+6. **vacancy_decontrol**: Does the ordinance allow landlords to raise rent by more than the regular cap when a tenant moves out (i.e., vacancy decontrol)?
+   - Return 1.0 if **vacancy decontrol is NOT allowed** (most restrictive).
+   - Return 0.0 if **vacancy decontrol IS allowed**, even if the increase is temporary, tied to CPI, or "until re-rented".
+   - Return 0.0 automatically if the phrase **“vacancy decontrol”** appears anywhere in the text.
+   - Use 0.5 if ambiguous or limited.
+
+Respond only with a valid JSON object using this structure:
+
 {{
   "max_rent_increase": float,
   "sf_exempt": float,
   "cpi_tied": float,
   "new_construction_exempt": float,
-  "hardship_appeals": float
+  "hardship_appeals": float,
+  "vacancy_decontrol": float
 }}
-Use a scale of 0 to 1 where 1 is the most restrictive.
