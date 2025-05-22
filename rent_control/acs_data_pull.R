@@ -106,11 +106,19 @@ city_population_by_year_naming <- city_population_by_year %>%
       tolower(NAME) %in% c("princeton township", "princeton borough") ~ "princeton",
       tolower(NAME) %in% c("west paterson borough") ~ "woodland park borough",
       tolower(NAME) %in% c("pahaquarry township") ~ "hardwick township",
-      tolower(NAME) %in% c("dover township")& NAME == "Ocean" ~ "toms river township",
+      tolower(NAME) %in% c("dover township") ~ "toms river township",
       tolower(NAME) %in% c("south belmar borough") ~ "lake como borough",
       tolower(NAME) %in% c("pine valley borough") ~ "pine hill borough",
-      tolower(NAME) %in% c("toms river") & NAME == "Ocean" ~ "toms river township",
-      tolower(NAME) %in% c("washington township") & NAME == "Mercer" ~ "robbinsville township",
+      tolower(NAME) %in% c("toms river") ~ "toms river township",
+      #tolower(NAME) %in% c("washington township") & NAME == "Mercer" ~ "robbinsville township",
+      tolower(NAME) %in% c("verona borough township") ~ "verona township",
+      tolower(NAME) %in% c("caldwell borough township") ~ "caldwell borough",
+      tolower(NAME) %in% c("glen ridge borough township") ~ "glen ridge borough",
+      tolower(NAME) %in% c("essex fells township") ~ "essex fells borough",
+      tolower(NAME) %in% c("north caldwell township") ~ "north caldwell borough",
+      tolower(NAME) %in% c("orange township", "orange township city") ~ "city of orange township",
+      tolower(NAME) %in% c("carney's point township") ~ "carneys point township",
+      tolower(NAME) %in% c("hawthorn borough") ~ "hawthorne borough",
       TRUE ~ NAME
     )
   )%>%
@@ -128,19 +136,20 @@ geometry_reference <- city_population_by_year_naming %>%
 geom_lookup <- st_geometry(geometry_reference)
 names(geom_lookup) <- geometry_reference$Place_Name_Clean
 
-city_population_by_year_filled <- city_population_by_year_naming
+city_population_by_year_filled <- city_population_by_year_naming 
+
 st_geometry(city_population_by_year_filled) <- mapply(
-  function(current_geom, name) {
-    if (st_is_empty(current_geom)) {
-      geom_lookup[[name]]
-    } else {
-      current_geom
-    }
-  },
-  st_geometry(city_population_by_year_naming),
-  city_population_by_year_naming$Place_Name_Clean,
-  SIMPLIFY = FALSE
-) %>% st_sfc(crs = st_crs(city_population_by_year_naming))
+    function(current_geom, name) {
+      if (st_is_empty(current_geom)) {
+        geom_lookup[[name]]
+      } else {
+        current_geom
+      }
+    },
+    st_geometry(city_population_by_year_naming),
+    city_population_by_year_naming$Place_Name_Clean,
+    SIMPLIFY = FALSE
+  ) %>% st_sfc(crs = st_crs(city_population_by_year_naming))
 
 city_population_by_year_filled <- st_centroid(city_population_by_year_filled)
 
@@ -148,14 +157,34 @@ nrow(city_population_by_year_filled)
 city_population_by_year_filled <- st_intersection(city_population_by_year_filled,nj_counties)
 # nrow(test)
 city_population_by_year_filled2 <- st_drop_geometry(city_population_by_year_filled)
-head(city_population_by_year_filled)
+#head(city_population_by_year_filled)
 beep()
+city_population_by_year_filled2$County_Name <- city_population_by_year_filled2$NAME.1
 
+city_population_by_year_filled2 <- city_population_by_year_filled2 %>%
+  mutate(
+    Place_Name_Clean = case_when(
+      str_to_lower(NAME) %in% c("princeton township", "princeton borough") ~ "princeton",
+      str_to_lower(NAME) == "west paterson borough" ~ "woodland park borough",
+      str_to_lower(NAME) == "pahaquarry township" ~ "hardwick township",
+      str_to_lower(NAME) == "dover township" & County_Name == "Ocean" ~ "toms river township",
+      str_to_lower(NAME) == "toms river" & County_Name == "Ocean" ~ "toms river township",
+      str_to_lower(NAME) == "washington township" & County_Name == "Mercer" ~ "robbinsville township",
+      str_to_lower(NAME) == "south belmar borough" ~ "lake como borough",
+      str_to_lower(NAME) == "pine valley borough" ~ "pine hill borough",
+      str_to_lower(NAME) == "verona borough township" ~ "verona township",
+      str_to_lower(NAME) == "caldwell borough township" ~ "caldwell borough",
+      str_to_lower(NAME) == "glen ridge borough township" ~ "glen ridge borough",
+      str_to_lower(NAME) == "essex fells township" ~ "essex fells borough",
+      str_to_lower(NAME) == "north caldwell township" ~ "north caldwell borough",
+      str_to_lower(NAME) %in% c("orange township", "orange township city") ~ "city of orange township",
+      str_to_lower(NAME) == "carney's point township" ~ "carneys point township",
+      str_to_lower(NAME) == "hawthorn borough" ~ "hawthorne borough",
+      TRUE ~ str_to_lower(NAME)
+    )
+  )
 
-
-head(city_population_by_year_filled2)
-city_population_by_year_filled2 <- city_population_by_year_filled2%>%
-  rename(County_Name=`NAME.1`)
+nrow(city_population_by_year_filled2)
 
 reference_names <- city_population_by_year_filled2 %>%
   filter(decade == 2020) %>%
@@ -189,7 +218,7 @@ city_population_matched <- best_matches %>%
 #,"Year"="Year"
 #,relationship = "many-to-many"
 
-
+#######
 nj_1980_pop_cs <- read_csv("../nhgis0013_csv/nhgis0013_ds104_1980_cty_sub.csv")
 nj_1980_pop_cs <- filter(nj_1980_pop_cs,STATEA == "34")
 names(nj_1980_pop_cs)
@@ -279,8 +308,10 @@ nj_pop_all <- nj_pop_all %>%
     Place_Name_Clean = str_trim(Place_Name_Clean)                                # final trim
   )
 
+
 print(unique(nj_pop_all$Place_Name_Clean))
 
+nrow(nj_pop_all_cleaned)
 nj_pop_all_cleaned <- nj_pop_all %>%
   group_by(Place_Name_Clean, population, YEAR, STATEA) %>%
   mutate(
@@ -293,6 +324,17 @@ nj_pop_all_cleaned <- nj_pop_all %>%
   ungroup() %>%
   filter(keep) %>%
   select(-keep)
+
+nj_pop_all_cleaned <- nj_pop_all_cleaned %>%
+  mutate(expand = case_when(
+    YEAR == 1980 ~ 10,
+    YEAR == 1990 ~ 10,
+    TRUE ~ 1
+  )) %>%
+  uncount(weights = expand) %>%
+  group_by(GISJOIN, YEAR) %>%
+  mutate(Year = if (unique(YEAR) == 1980) 1980:1989 else if (unique(YEAR) == 1990) 1990:1999 else YEAR) %>%
+  ungroup() 
 
 
 city_pop_names <- unique(city_population_matched$Place_Name_Clean)
@@ -310,16 +352,10 @@ nj_pop_all2 %>%
   filter(n > 1 | counties > 1)%>%
   print(n=100)
 
-nj_pop_all2 <- nj_pop_all2 %>%
-  mutate(expand = case_when(
-    YEAR == 1980 ~ 10,
-    YEAR == 1990 ~ 10,
-    TRUE ~ 1
-  )) %>%
-  uncount(weights = expand) %>%
-  group_by(GISJOIN, YEAR) %>%
-  mutate(Year = if (unique(YEAR) == 1980) 1980:1989 else if (unique(YEAR) == 1990) 1990:1999 else YEAR) %>%
-  ungroup() 
+
+
+
+
 
 
 nj_pop_all3 <- nj_pop_all2 %>%
@@ -334,3 +370,12 @@ nj_pop_all3 <- nj_pop_all2 %>%
         population
       )
   )
+nrow(nj_pop_all3)
+
+nj_pop_all3 %>%
+  group_by(Place_Name_Clean) %>%
+  summarise(num_years = n_distinct(Year)) %>%
+  arrange(num_years)%>%
+  print(n=1000)
+
+

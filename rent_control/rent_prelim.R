@@ -8,7 +8,7 @@ library(stringr)
 library(lubridate)
 library(purrr)
 library(arrow)
-library(ggplot)
+library(ggplot2)
 
 
 ### Cross walks ----
@@ -209,6 +209,22 @@ nrow(nj_all2)
 nj_allx <- merge(nj_all2,nj_county_city_crosswalk,by="County_Code")
 nrow(nj_allx)
 
+##### missingness of permitting data ----
+
+nj_allx %>%
+  group_by(Year) %>%
+  summarise(num_cities = n_distinct(Place_Name_Clean)) %>%
+  arrange(Year)%>%
+  print(n=1000)
+
+
+nj_allx %>%
+  group_by(Place_Name_Clean) %>%
+  summarise(num_years = n_distinct(Year)) %>%
+  arrange(num_years)%>%
+  print(n=1000)
+
+drop_munis <- c("tavistock borough","millstone borough")
 nj_all_updated <- nj_allx %>%
   mutate(
     Place_Name_Clean = case_when(
@@ -220,18 +236,35 @@ nj_all_updated <- nj_allx %>%
       tolower(Place_Name_Clean) %in% c("pine valley borough") ~ "pine hill borough",
       tolower(Place_Name_Clean) %in% c("toms river town") ~ "toms river township",
       tolower(Place_Name_Clean) %in% c("washington township") & County_Code == 21 ~ "robbinsville township",
+      tolower(Place_Name_Clean) %in% c("peapack and gladstone boro") ~ "peapack and gladstone borough",
+      tolower(Place_Name_Clean) %in% c("orange township city") ~ "city of orange township",
+      tolower(Place_Name_Clean) %in% c("orange township") ~ "city of orange township",
+      tolower(Place_Name_Clean) %in% c("orange township city") ~ "city of orange township",
+      tolower(Place_Name_Clean) %in% c("pahaquarry township (n)") ~ "hardwick township",
+      tolower(Place_Name_Clean) %in% c("walpack township (n)") ~ "walpack township",
+      tolower(Place_Name_Clean) %in% c("carney's point township") ~ "carneys point township",
+      tolower(Place_Name_Clean) %in% c("hawthorn borough") ~ "hawthorne borough",
+      tolower(Place_Name_Clean) %in% c("verona borough township") ~ "verona township",
+      tolower(Place_Name_Clean) %in% c("glen ridge borough township") ~ "glen ridge borough",
+      tolower(Place_Name_Clean) %in% c("north caldwell township") ~ "north caldwell borough",
+      tolower(Place_Name_Clean) %in% c("caldwell borough township") ~ "caldwell borough",
+      tolower(Place_Name_Clean) %in% c("passaic township") ~ "long hill township",
+      tolower(Place_Name_Clean) %in% c("essex fells township") ~ "essex fells borough",
+      tolower(Place_Name_Clean) %in% c("westhampton township") ~ "westampton township",
       TRUE ~ Place_Name_Clean
     )
   ) %>%
   group_by(Place_Name_Clean, Date, Year) %>%
   summarise(across(where(is.numeric), ~ sum(.x, na.rm = TRUE)),
             County_Name = first(County_Name),.groups = "drop")
+  
 
 names(nj_all_updated)
 nj_all_updated <- nj_all_updated %>%
   select(1:12, CBSA_Code,County_Name, multi_family, single_family)
 
 nj_all_updated <- nj_all_updated %>%
+  group_by(Place_Name_Clean)%>%
   filter(Year < 2025)
 
 nj_all_updated <- nj_all_updated %>%
@@ -248,6 +281,11 @@ nj_all_updated <- nj_all_updated %>%
   filter(month == 12)
 nrow(nj_all_updated)
 
+nj_all_updated %>%
+  group_by(Place_Name_Clean) %>%
+  summarise(num_years = n_distinct(Year)) %>%
+  arrange(num_years)%>%
+  print(n=1000)
 
 nj_all_updated %>%
   group_by(Place_Name_Clean, Date) %>%
@@ -307,7 +345,13 @@ print(unique(rent_control_intensity$Municipality))
 print(unique(nj_all_updated$Place_Name))
 
 
-#### Continuous treatment ----
+
+
+
+
+
+
+### Continuous treatment ----
 rent_control_intensity <- read_excel("../rent_control_scored_output.xlsx")
 
 rent_control_intensity <- rent_control_intensity %>%

@@ -1,13 +1,17 @@
 # 1.	 Amendments that impact permitting
-
+nrow(nj_all_updated)
+nrow(con_stag)
 con_stag <- merge(
   nj_all_updated,
   rc_combined,
   by.x = "Place_Name_Clean", by.y = "nj_all_match_rc", all.x = TRUE
 )
+nrow(con_stag)
+
 print(con_stag%>% subset(Place_Name_Clean == "woodland park borough"))
 
 nrow(con_stag)
+
 # --- Step 1: Aggregate con_stag to yearly ---
 con_stag_year <- con_stag %>%
   group_by(Place_Name_Clean, Year) %>%
