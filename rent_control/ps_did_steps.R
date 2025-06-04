@@ -9,10 +9,10 @@ panelview(turnout ~ policy_edr + policy_mail_in + policy_motor,
           xlab = "Year", ylab = "State")
 
 
-table(cs_data_filtered$G)
-table(table(cs_data_filtered$id))
+table(cs_data$G)
+table(table(cs_data$id))
 
-panel_data <- cs_data_filtered %>%
+panel_data <- cs_data %>%
   distinct(id, Year, .keep_all = TRUE)
 
 table(panel_data$G)
@@ -21,6 +21,9 @@ table(table(panel_data$id))
 panel_data <- panel_data %>%
   mutate(D = ifelse(G != 0, 1, 0),
          D = ifelse(G == 0, 0, D))
+
+panel_data <- panel_data %>%
+  mutate(D_post = ifelse(!is.na(G) & Year >= G, 1, 0))
 
 panelview(Y ~1,
           data = panel_data,
@@ -34,22 +37,39 @@ panelview(Y ~ 1,
           type = "treat",
           by.timing = TRUE)
 
-panelview(Y ~ D,
+panelview(Y ~ D_post,
           data = panel_data,
           index = c("id", "Year"),
           type = "treat",
           by.timing = TRUE)
 
+
+range(panel_data$Year)
+
+first_year <- min(panel_data$Year)
+
+treated <- panel_data %>%
+  group_by(id)%>%
+  filter(G !=0)
+
+panelview(Y ~ D_post,
+          data = treated,
+          index = c("id", "Year"),
+          type = "treat",
+          by.timing = TRUE)
+
+
 #### Step 2 - document treatment cohorts ----
 
-cs_data_filtered %>%
+cs_data %>%
   group_by(id) %>%
   summarize(treatment_year = min(G, na.rm = TRUE)) %>%
   mutate(treatment_year = ifelse(is.infinite(treatment_year), NA, treatment_year)) %>%
   count(treatment_year, name = "num_units") %>%
-  arrange(treatment_year)
+  arrange(treatment_year)%>%
+  print(n=100)
 
-cohort_table <- cs_data_filtered %>%
+cs_data_filtered %>%
   distinct(id, G) %>%
   mutate(G = ifelse(is.na(G), "Never treated", as.character(G))) %>%
   group_by(G) %>%
@@ -60,37 +80,69 @@ cohort_table <- cs_data_filtered %>%
   mutate(
     percent = round(100 * num_units / sum(num_units), 2)
   ) %>%
-  arrange(factor(G, levels = c("Never treated", sort(unique(panel_data$G)))))
-cohort_table
+  arrange(factor(G, levels = c("Never treated", sort(unique(panel_data$G)))))%>%
+  print(n=100)
 
-kable(cohort_table,
-     col.names = c("Treatment Cohort", "Number of Units", "Percent of Units in Cohort"),
-     caption = "Table 1: Number of Units by Treatment Cohort Timing Group")
+cs_data_filtered %>%
+  distinct(id, G) %>%
+  mutate(G = ifelse(is.na(G), "0", as.character(G))) %>%
+  group_by(G) %>%
+  summarise(num_units = n(), .groups = "drop") %>%
+  arrange(as.numeric(G)) %>%
+  mutate(
+    cum_units = cumsum(if_else(G == "0", 0L, num_units)),
+    cum_units = if_else(G == "0", num_units, cum_units),
+    total_units = sum(num_units),
+    cum_percent = round(100 * cum_units / total_units, 2)
+  ) %>%
+  select(G, num_units = cum_units, percent = cum_percent) %>%
+  print(n = 100)
+
 
 
 #### Step 3 - Pre-trends ----
 
 
-panel_data_event <- cs_data_prep %>%
-  filter(!is.na(G) & G != 0) %>%  # only ever-treated units
-  mutate(event_time = T - G) 
+panel_data_event <- cs_data %>%
+  filter(G != 0) %>%  # only ever-treated units
+  filter(G >1950)%>%
+  mutate(event_time = Year - G) 
 
-panel_data_event %>%
+table(panel_data_event$G)
+
+plot_nj_ag_permits <- panel_data_event %>%
   group_by(event_time) %>%
-  summarise(mean_outcome = mean(Y, na.rm = TRUE)) %>%
-  ggplot(aes(x = event_time, y = mean_outcome)) +
+  summarise(mf_outcome = mean(log_mf_sum, na.rm = TRUE),
+            mf_sum = sum(multi_family_sum, na.rm = TRUE),
+            sf_sum = sum(single_family_sum, na.rm = TRUE)) 
+
+
+ggplot(plot_nj_ag_permits, aes(x = event_time, y = mf_outcome)) +
   geom_line(size = 1) +
   geom_vline(xintercept = 0, linetype = "dashed") +
-  labs(title = "Pre-Treatment Trends in Property Value",
+  labs(title = "Pre-Treatment Trends",
        x = "Event Time (Years Since Treatment)",
-       y = "Mean log(EMV + 1)")
+       y = "Mean log(permits)")
 
+
+plot_nj_ag_permits <- nj_all2 %>%
+  group_by(Year) %>%
+  summarise(mf_sum = sum(multi_family, na.rm = TRUE),
+            sf_sum = sum(single_family, na.rm = TRUE)) 
+
+plot_nj_ag_permits_long <- plot_nj_ag_permits %>%
+  pivot_longer(cols = c(mf_sum, sf_sum), names_to = "outcome_type", values_to = "value")
+
+ggplot(plot_nj_ag_permits_long, aes(x = Year, y = value, color = outcome_type)) +
+  geom_line() +
+  theme_minimal() +
+  labs(color = "Outcome")
 
 
 panel_data_event %>%
-  group_by(G, year) %>%
-  summarise(mean_outcome = mean(Y, na.rm = TRUE), .groups = "drop") %>%
-  ggplot(aes(x = year, y = mean_outcome, color = as.factor(G))) +
+  group_by(G, Year) %>%
+  summarise(mf_outcome = mean(log_mf_sum, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = Year, y = mf_outcome, color = as.factor(G))) +
   geom_line(size = 1) +
   facet_wrap(~G)%>%
   geom_vline(xintercept = 0, linetype = "dashed") +
@@ -102,53 +154,61 @@ panel_data_event %>%
 
 
 panel_data_cohorts <- cs_data %>%
-  filter(!is.na(G) & G > 0) %>%  # Only ever-treated
+  filter(!is.na(G) & G > 0 & G != 1006) %>%  # Only ever-treated
   group_by(G, Year) %>%
-  summarise(mean_outcome = mean(Y, na.rm = TRUE), .groups = "drop") %>%
+  summarise(mf_outcome = mean(multi_family_sum, na.rm = TRUE),
+            sf_outcome = mean(single_family_sum, na.rm = TRUE),
+            G = first(G),
+            .groups = "drop") %>%
   mutate(cohort_label = paste0(G, " cohort"))
 
-never_treated <- panel_data %>%
+never_treated <- cs_data %>%
   filter(G == 0) %>%
   group_by(Year) %>%
-  summarise(mean_outcome = mean(Y, na.rm = TRUE), .groups = "drop") %>%
+  summarise(mf_outcome = mean(multi_family_sum, na.rm = TRUE),
+            sf_outcome = mean(single_family_sum, na.rm = TRUE),
+            G = first(G),
+            .groups = "drop") %>%
   mutate(cohort_label = "never treated", G = NA)
 
-pre_treated <- panel_data %>%
-  filter(G != 0 &G < Year) %>%
+pre_treated <- cs_data %>%
+  filter(G != 0 &G < Year & G >1950) %>%
   group_by(Year) %>%
-  summarise(mean_outcome = mean(Y, na.rm = TRUE), .groups = "drop") %>%
+  summarise(mf_outcome = mean(multi_family_sum, na.rm = TRUE),
+            sf_outcome = mean(single_family_sum, na.rm = TRUE),
+            .groups = "drop") %>%
   mutate(cohort_label = "Pre Treated", G = NA)
 
 plot_data <- bind_rows(panel_data_cohorts, never_treated, pre_treated)
+plot_data_long <- plot_data %>%
+  pivot_longer(cols = c(sf_outcome, mf_outcome), names_to = "outcome_type", values_to = "value")
 
-ggplot(plot_data, aes(x = Year, y = mean_outcome, group = cohort_label)) +
+ggplot(plot_data, aes(x = Year, y = sf_outcome)) +
   geom_line(color = "blue") +
   geom_vline(aes(xintercept = G), color = "red", linetype = "dashed") +
-  facet_wrap(~ cohort_label, scales = "free" ) +
+  facet_wrap(~ cohort_label, scales = "free") +
   theme_minimal()
 
+ggplot(plot_data_long, aes(x = Year, y = value, color = outcome_type)) +
+  geom_line() +
+  geom_vline(aes(xintercept = G), color = "black", linetype = "dashed") +
+  facet_wrap(~ cohort_label, scales = "free") +
+  theme_minimal() +
+  labs(color = "Outcome")
+
+drop_cohorts <- cs_data %>%
+  filter(G == 2015 | G ==2017)%>%
+  pull((Place_Name_Clean))
+drop_cohorts
+
+
+cs_data %>%
+  filter(G == 2016)
 
 #### Step 4 - Understand Treatment Assignment ----
 
-panel_data <- cs_data_prep %>%
-  mutate(treated = ifelse(!is.na(G) & G != 0, 1, 0))%>%
-  filter((G != 0 & distance_m < 2500) | G == 0)
 
-#names(panel_data)
-panel_data %>%
-  filter(T < G | is.na(G)) %>%  # pre-treatment only
-  group_by(treated) %>%
-  summarise(
-    avg_size = mean(ACREAGE, na.rm = TRUE),
-    avg_value = mean(REAL_EMV_log1p, na.rm = TRUE),
-    avg_tax= mean(REAL_tax_log1p, na.rm = TRUE),
-    avg_tax_share = mean(tax_share, na.rm = TRUE)
-  )
 
-model <- glm(treated ~ log(ACREAGE + 1) + REAL_EMV_log1p + tax_share,
-             data = panel_data %>% filter(T == min(T)),
-             family = binomial)
-summary(model)
 
 
 

@@ -14,6 +14,41 @@ nj_muni_shape <- nj_muni_shape %>%
 nj_muni_df <- st_drop_geometry(nj_muni_shape)
 
 
+reference_names <- nj_muni_df %>%
+  distinct(Municipality_Clean, County_Name)
+
+# con_stag_year should also have Place_Name_Clean and Year
+con_names <- con_stag_year_pop %>%
+  distinct(Place_Name_Clean,County_Name, Year)
+
+# 2. Fuzzy match by name (but retain year from both sides)
+# Step 1: Fuzzy match only by name
+match_table <- stringdist_inner_join(
+  con_names,                     # has Place_Name_Clean + Year
+  reference_names,              # has Municipality_Clean + County_Name
+  by = c("Place_Name_Clean" = "Municipality_Clean","County_Name"="County_Name"),
+  method = "jw",
+  max_dist = 0.2,
+  distance_col = "distance"
+) %>%
+  rename(name_con = Place_Name_Clean, name_ref = Municipality_Clean)
+
+# Step 2: If desired, filter best match per name-year
+match_table_filtered <- match_table %>%
+  group_by(name_con, Year) %>%
+  slice_min(order_by = Place_Name_Clean.distance, n = 1) %>%
+  ungroup()%>%
+  rename("County_Name" = "County_Name.x")
+
+nj_muni_df_improved <- nj_muni_df %>%
+  left_join(
+    match_table_filtered,
+    by = c("Municipality_Clean" = "name_ref", "County_Name")
+  )
+
+
+
+
 #### Survey Continuous treatment ----
 nj_survey <-readxl::read_excel("../openai_nj_rent_control_survey.xlsx")
 print(unique(nj_survey$`Units-in-Structure Ordinance Applies to`))

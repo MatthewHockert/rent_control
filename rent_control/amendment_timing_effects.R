@@ -1,3 +1,5 @@
+library(did)
+
 # 1.	 Amendments that impact permitting
 nrow(nj_all_updated)
 nrow(con_stag)
@@ -77,10 +79,10 @@ con_stag_year %>%
   theme_minimal()
 
 nrow(con_stag_year)
-# con_stag_year_pop <- con_stag_year
-con_stag_year_pop <- merge(con_stag_year,nj_pop_all3,by=c("Place_Name_Clean","County_Name","Year"))
+con_stag_year_pop <- con_stag_year
+#con_stag_year_pop <- merge(con_stag_year,nj_pop_all3,by=c("Place_Name_Clean","County_Name","Year"))
 nrow(con_stag_year_pop)
-names(which(table(con_stag_year_pop$Place_Name_Clean) != 25))
+names(which(table(con_stag_year_pop$Place_Name_Clean) != 37))
 
 
 con_stag_year_pop <- con_stag_year_pop %>%
@@ -104,10 +106,22 @@ con_stag_year_pop <- con_stag_year_pop %>%
 hist(con_stag_year_pop$mf_permits_per_1000)
 hist(con_stag_year_pop$mf_log_permits_per_1000)
 
+anti_join(
+  con_stag_year_pop,
+  nj_muni_df,
+  by = c("Place_Name_Clean" = "Municipality_Clean", "County_Name" = "County_Name")
+)
+
 nrow(con_stag_year_pop)
-con_stag_year2 <- merge(con_stag_year_pop, nj_muni_df,by.x = c("Place_Name_Clean",'County_Name'), by.y=c("Municipality_Clean",'County_Name'))
+con_stag_year2 <- merge(con_stag_year_pop, nj_muni_df_improved,by.x = c("Place_Name_Clean",'County_Name',"Year"), by.y=c("name_con",'County_Name',"Year"))
 nrow(con_stag_year2)
-names(which(table(con_stag_year2$Place_Name_Clean) != 25))
+names(which(table(con_stag_year2$Place_Name_Clean) != 37))
+
+missing_nj_muni_con_stag <- anti_join(
+  con_stag_year_pop,
+  nj_muni_df_improved,
+  by = c("Place_Name_Clean" = "name_con", "County_Name" = "County_Name","Year"="Year")
+)
 
 
 # con_stag_year2 %>%
@@ -115,7 +129,7 @@ names(which(table(con_stag_year2$Place_Name_Clean) != 25))
 #   distinct(Place_Name_Clean, first_treatment_year) %>%
 #   count(first_treatment_year) 
 
-ggplot(con_stag_year2, aes(x = Year, y = mf_log_permits_per_1000,group=adoption_group, color = adoption_group)) +
+ggplot(con_stag_year2, aes(x = Year, y = log_mf_sum,group=adoption_group, color = adoption_group)) +
   stat_summary(fun = mean, geom = "line", size = 1.2) +
   labs(
     title = "Single Family Development Trends",
@@ -129,7 +143,7 @@ ggplot(con_stag_year2, aes(x = Year, y = mf_log_permits_per_1000,group=adoption_
 
 con_stag_long <- con_stag_year2 %>%
   pivot_longer(
-    cols = c(mf_log_permits_per_1000, sf_log_permits_per_1000),
+    cols = c(log_mf_sum, log_sf_sum),
     names_to = "unit_type",
     values_to = "permits"
   )
@@ -147,7 +161,7 @@ ggplot(con_stag_long, aes(x = Year, y = permits, color = unit_type, group = unit
   theme(legend.position = "top")
 
 
-ggplot(con_stag_year2 %>% filter(Place_Name_Clean %in% c("newark", "jersey city","hoboken","cape may point borough")), aes(x = Year, y = mf_permits_per_1000, color = Place_Name_Clean, group = Place_Name_Clean)) +
+ggplot(con_stag_year2 %>% filter(Place_Name_Clean %in% c("newark", "jersey city","hoboken","cape may point borough")), aes(x = Year, y = log_mf_sum, color = Place_Name_Clean, group = Place_Name_Clean)) +
   stat_summary(fun = mean, geom = "line", size = 1.2) +
   labs(
     title = "Multi-Family Permitting Trends",
@@ -163,7 +177,7 @@ zero_mf <- con_stag_year2 %>%
   group_by(Place_Name_Clean) %>%
   summarize(
     total_years = n(),
-    zero_years = sum(mf_permits_per_1000 == 0, na.rm = TRUE)
+    zero_years = sum(log_mf_sum == 0, na.rm = TRUE)
   ) %>%
   filter(zero_years == total_years)
 
@@ -171,8 +185,8 @@ zero_permits <-con_stag_year2 %>%
   group_by(Place_Name_Clean) %>%
   summarize(
     total_years = n(),
-    zero_mf = sum(mf_permits_per_1000 == 0, na.rm = TRUE),
-    zero_sf = sum(sf_permits_per_1000 == 0, na.rm = TRUE)
+    zero_mf = sum(log_mf_sum == 0, na.rm = TRUE),
+    zero_sf = sum(log_sf_sum == 0, na.rm = TRUE)
   ) %>%
   filter(zero_mf == total_years & zero_sf == total_years)
 
@@ -196,6 +210,7 @@ city_size_bin_lookup <- con_stag_year2 %>%
 # Merge back to full panel
 con_stag_year2 <- con_stag_year2 %>%
   left_join(city_size_bin_lookup, by = "Place_Name_Clean")
+names(which(table(con_stag_year2$Place_Name_Clean) != 37))
 
 balance_table <-con_stag_year2 %>%
   group_by(adoption_group) %>%
@@ -226,18 +241,21 @@ cs_data <- con_stag_year2 %>%
   mutate(
     time = as.numeric(Year),
     G = G,
-    Y = sf_log_permits_per_1000
+    Y = log_mf_sum,
+    Y2 = multi_family_sum
   )
+names(which(table(cs_data$Place_Name_Clean) != 37))
 
 cs_data <- cs_data %>%
   arrange(Place_Name_Clean,Year)%>%
   group_by(Place_Name_Clean)%>%
   mutate(event_time = ifelse(G > 0, Year - G, NA_integer_))%>%
-  filter(is.na(event_time) | (event_time >= -10 & event_time <= 10),G!=1990)
+  filter(is.na(event_time) | (event_time >= -10 & event_time <= 10))
 
 table(table(cs_data$id))
 table(cs_data$G)
 #colSums(is.na(cs_data))
+names(which(table(cs_data$Place_Name_Clean) != 37))
 
 cs_data <- cs_data %>%
   mutate(
@@ -250,15 +268,15 @@ cs_data <- cs_data %>%
   )
 
 att_gt_results <- att_gt(
-  yname = "Y",
-  tname = "time",
+  yname = "single_family_sum",
+  tname = "Year",
   idname = "id",
   gname = "G",
-  xformla = ~ County_Name + MUN_TYPE + size_bin,
-  control_group = "nevertreated",
-  data = cs_data,
-  #panel = T,
-  allow_unbalanced_panel = T,
+  #xformla = ~ County_Name + MUN_TYPE,
+  control_group = "notyettreated",
+  data = cs_data %>% filter(G != 2015 & G != 2017),
+  panel = T,
+  #allow_unbalanced_panel = T,
   est_method = "reg"
 )
 
@@ -269,8 +287,8 @@ ggdid(es_results)
 es_results_trimmed <- aggte(
   att_gt_results,
   type = "dynamic",
-  min_e = -5,
-  max_e = 5,
+  min_e = -10,
+  max_e = 10,
   na.rm = TRUE
 )
 summary(es_results_trimmed)
@@ -285,11 +303,19 @@ cs_data_filtered <- cs_data %>%
   arrange(Place_Name_Clean,Year)%>%
   group_by(Place_Name_Clean)%>%
   # Only keep never-treated or treated after 2000
-  filter(G == 0 | (G >2000 & !is.na(first_amendment_year))) %>%
+  filter(G == 0 | (!is.na(first_amendment_year))) %>%
   # For treated units, drop years after the first amendment
   filter(G == 0 | Year <= (first_amendment_year - 1))%>%
   mutate(event_time = ifelse(G > 0, Year - G, NA_integer_))%>%
   filter(is.na(event_time) | (event_time >= -10 & event_time <= 10))
+
+cs_data_filtered <- cs_data %>%
+  arrange(Place_Name_Clean, Year) %>%
+  group_by(Place_Name_Clean) %>%
+  # Keep never-treated units or units treated after 2000 with amendment info
+  filter(G == 0 | (!is.na(first_amendment_year))& Year < first_amendment_year) %>%
+  mutate(event_time = ifelse(G > 0, Year - G, NA_integer_)) %>%
+  filter(is.na(event_time) | (event_time >= -15 & event_time <= 15))
 
 cs_data_filtered <- cs_data %>%
   arrange(Place_Name_Clean, Year) %>%
@@ -302,14 +328,13 @@ cs_data_filtered <- cs_data %>%
   mutate(
     G = if_else(adoption_group == "Pre-2000", 0L, G),
     event_time = if_else(G > 0, Year - G, NA_integer_)
-  )%>%
-filter(is.na(event_time) | (event_time >= -10 & event_time <= 10))
-table(cs_data_filtered$G == 0, useNA = "always")
+  )%>%filter(is.na(event_time) | (event_time >= -10 & event_time <= 10))
 
+table(cs_data_filtered$G == 0, useNA = "always")
 table(cs_data_filtered$time < cs_data_filtered$G, useNA = "always")
 table(cs_data_filtered$G, cs_data_filtered$time < cs_data_filtered$G)
 
-max(cs_data_filtered$event_time,na.rm=T)
+range(cs_data_filtered$event_time,na.rm=T)
 cs_data_filtered %>%
   group_by(id) %>%
   summarise(
@@ -336,6 +361,15 @@ cs_data_filtered %>%
   labs(title = "Number of Treated Units by Event Time",
        x = "Event Time", y = "Number of Units")
 
+cs_data_filtered %>%
+  filter(G > 0) %>%
+  group_by(id, G) %>%
+  summarise(has_pre_period = any(Year < G),
+            f1_year = first(Year),
+            f1_treat = first(first_treatment_year),
+            f1_amend =first(first_amendment_year),
+            .groups = "drop") %>%
+  filter(!has_pre_period)
 
 att_gt_first_stage <- att_gt(
   yname = "Y",
@@ -343,12 +377,11 @@ att_gt_first_stage <- att_gt(
   idname = "id",
   gname = "G",
   xformla = ~ County_Name + MUN_TYPE + size_bin,
-  control_group = "nevertreated",
+  control_group = "notyettreated",
   data = cs_data_filtered,
-  panel=T,
+  #panel=T,
   allow_unbalanced_panel = TRUE,
-  est_method = "reg",
-  anticipation = 1
+  est_method = "reg"
   )
 
 es_results_first_stage <- aggte(att_gt_first_stage, type = "dynamic", na.rm = TRUE)

@@ -99,7 +99,7 @@ city_population_by_year <- city_population_by_year %>%
   slice(1) %>%  # keep the first one (i.e., "place" if available)
   ungroup()
 
-
+nrow(city_population_by_year)
 city_population_by_year_naming <- city_population_by_year %>%
   mutate(
     Place_Name_Clean = case_when(
@@ -126,6 +126,7 @@ city_population_by_year_naming <- city_population_by_year %>%
   summarise(NAME= first(NAME),
               across(where(is.numeric), ~ sum(.x, na.rm = TRUE)), .groups = "drop")
 
+nrow(city_population_by_year_naming)
 geometry_reference <- city_population_by_year_naming %>%
   filter(Year >= 2020, !st_is_empty(geometry)) %>%
   group_by(Place_Name_Clean) %>%
@@ -151,11 +152,25 @@ st_geometry(city_population_by_year_filled) <- mapply(
     SIMPLIFY = FALSE
   ) %>% st_sfc(crs = st_crs(city_population_by_year_naming))
 
-city_population_by_year_filled <- st_centroid(city_population_by_year_filled)
+city_population_by_year_filled_centroid <- st_centroid(city_population_by_year_filled)
 
 nrow(city_population_by_year_filled)
-city_population_by_year_filled <- st_intersection(city_population_by_year_filled,nj_counties)
-# nrow(test)
+city_population_by_year_filled <- st_intersection(city_population_by_year_filled_centroid,nj_counties)
+nrow(city_population_by_year_filled)
+
+
+no_merge<-anti_join(
+  st_drop_geometry(city_population_by_year_filled_centroid), 
+  st_drop_geometry(city_population_by_year_filled),
+  by = ("Place_Name_Clean")
+)
+
+anti_join(
+  st_drop_geometry(no_merge), 
+  st_drop_geometry(con_stag_year),
+  by = ("Place_Name_Clean")
+)
+
 city_population_by_year_filled2 <- st_drop_geometry(city_population_by_year_filled)
 #head(city_population_by_year_filled)
 beep()
@@ -186,35 +201,42 @@ city_population_by_year_filled2 <- city_population_by_year_filled2 %>%
 
 nrow(city_population_by_year_filled2)
 
+# 1. Prepare inputs with both name and year
 reference_names <- city_population_by_year_filled2 %>%
-  filter(decade == 2020) %>%
-  select(Place_Name_Clean) %>%
-  distinct()
+  distinct(Place_Name_Clean, Year)
 
+# con_stag_year should also have Place_Name_Clean and Year
+con_names <- con_stag_year %>%
+  distinct(Place_Name_Clean, Year)
+
+# 2. Fuzzy match by name (but retain year from both sides)
 match_table <- stringdist_inner_join(
-  con_stag_year %>% distinct(Place_Name_Clean),
+  con_names,
   reference_names,
-  by = "Place_Name_Clean",
+  by = c("Place_Name_Clean","Year"),
   method = "jw",
   max_dist = 0.2,
   distance_col = "distance"
 ) %>%
-  rename(name_con = Place_Name_Clean.x, name_pop = Place_Name_Clean.y) %>%
-  arrange(name_con, distance)
+  rename(name_con = Place_Name_Clean.x,
+         name_pop = Place_Name_Clean.y,
+         Year = Year.x) %>%  # retain year from con_stag
+  arrange(name_con, Year, distance)
 
+# 3. Choose best match per place-year
 best_matches <- match_table %>%
-  group_by(name_con) %>%
+  group_by(name_con, Year) %>%
   slice_min(order_by = distance, n = 1) %>%
   ungroup()
 
+city_population_by_year_filled2$Year <- as.numeric(city_population_by_year_filled2$Year)
 
-
-city_population_by_year_filled2$Year <- as.character(city_population_by_year_filled2$Year)
-
+nrow(city_population_by_year_filled2)
+# 4. Join matched names + year to full population data
 city_population_matched <- best_matches %>%
-  rename(Place_Name_Clean = name_con) %>%  # rename for downstream merge
-  left_join(city_population_by_year_filled2, by = c("name_pop" = "Place_Name_Clean"),relationship = "many-to-many")
+  left_join(city_population_by_year_filled2, by = c("name_pop" = "Place_Name_Clean", "Year"))
 
+nrow(city_population_matched)
 #,"Year"="Year"
 #,relationship = "many-to-many"
 
