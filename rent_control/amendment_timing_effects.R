@@ -272,12 +272,13 @@ att_gt_results <- att_gt(
   tname = "Year",
   idname = "id",
   gname = "G",
-  #xformla = ~ County_Name + MUN_TYPE,
+  xformla = ~ County_Name + MUN_TYPE + size_bin,
   control_group = "notyettreated",
-  data = cs_data %>% filter(G != 2015 & G != 2017),
-  panel = T,
-  #allow_unbalanced_panel = T,
-  est_method = "reg"
+  data = cs_data_class %>% filter(G==0|mf_class == "High MF"),
+  #panel = T,
+  allow_unbalanced_panel = T,
+  est_method = "reg",
+  anticipation = 1
 )
 
 es_results <- aggte(att_gt_results, type = "dynamic",na.rm = TRUE)

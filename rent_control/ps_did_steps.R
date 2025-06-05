@@ -205,6 +205,66 @@ drop_cohorts
 cs_data %>%
   filter(G == 2016)
 
+cs_data$multi_family_sum
+pre_treatment_avg <- cs_data %>%
+  filter(Year < G) %>% 
+  group_by(Place_Name_Clean) %>%
+  summarise(
+    G = first(G),
+    avg_mf_permits = mean(multi_family_sum, na.rm = TRUE),
+    n_years = n()
+  ) %>%
+  ungroup()
+
+threshold <- median(pre_treatment_avg$avg_mf_permits, na.rm = TRUE)
+threshold
+
+pre_treatment_avg <- pre_treatment_avg %>%
+  mutate(
+    mf_class = if_else(avg_mf_permits > threshold, "High MF", "Low MF")
+  )
+cs_data_class <- cs_data %>% # Go back to model in amendment_timing_effects
+  left_join(pre_treatment_avg %>% select(Place_Name_Clean, mf_class), by = "Place_Name_Clean")
+
+table(cs_data[cs_data$mf_class == "High MF", ]$G)
+
+threshold
+cs_data_class %>%
+  arrange(Place_Name_Clean,year)%>%
+  filter(Year < G) %>% 
+  group_by(G) %>%
+  summarise(avg_mf_permits = mean(multi_family_sum, na.rm = TRUE)) %>%
+  arrange(G)%>%
+  print(n=100)
+
+cs_data_class %>%
+  filter(Year < G)%>%
+  arrange(G)%>%
+  pull(G)%>%
+  unique()
+
+cs_data %>%
+  filter(G>0)%>%
+  arrange(G)%>%
+  pull(G)%>%
+  unique()
+
+cs_data %>%
+  group_by(G) %>%
+  summarise(min_year = min(Year), max_year = max(Year)) %>%
+  filter(min_year >= G)%>%
+  print(n=100)
+
+table(cs_data_class$mf_class, cs_data_class$size_bin)
+table(cs_data_class$mf_class, cs_data_class$MUN_TYPE)
+table(cs_data_class$mf_class, cs_data_class$Place_Name_Clean)
+
+cs_data_class %>%
+  count(mf_class, size_bin) %>%
+  group_by(mf_class) %>%
+  mutate(prop = n / sum(n)) %>%
+  arrange(mf_class, desc(prop))
+
 #### Step 4 - Understand Treatment Assignment ----
 
 
