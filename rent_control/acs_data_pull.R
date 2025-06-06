@@ -5,6 +5,7 @@ library(dplyr)
 library(stringdist)
 library(fuzzyjoin)
 library(sf)
+library(readxl)
 nj_counties <- st_read('../cb_2024_us_county_500k')
 nj_counties <- filter(nj_counties,STATEFP=="34")
 msa <- st_read("../cb_2024_us_metdiv_500k")
@@ -399,5 +400,48 @@ nj_pop_all3 %>%
   summarise(num_years = n_distinct(Year)) %>%
   arrange(num_years)%>%
   print(n=1000)
+
+
+##### pull NJ population data ----
+nj_1980 <- read_excel("../populations/nj_population_1980_89.xlsx")
+nj_1990 <- read_excel("../populations/inter9099.xlsx")
+nj_2000 <- read_excel("../populations/mcdest2009-2.xlsx")
+nj_2010 <- read_excel("../populations/sub-mcd-est2020int-pop-34.xlsx")
+nj_2020 <- read_excel("../populations/SUB-MCD-EST2024-POP-34.xlsx")
+
+nj_1980_long <- nj_1980 %>%
+  pivot_longer(
+    cols = -c(Municipality, County),
+    names_to = "Year",
+    values_to = "population"
+  )
+
+nj_1990_long <- nj_1990 %>%
+  pivot_longer(cols = -c(Municipality, County), names_to = "Year", values_to = "population")
+
+nj_2000_long <- nj_2000 %>%
+  pivot_longer(cols = -c(Municipality, County), names_to = "Year", values_to = "population")
+
+nj_2010_long <- nj_2010 %>%
+  pivot_longer(cols = -c(Municipality, County), names_to = "Year", values_to = "population")
+
+nj_2020_long <- nj_2020 %>%
+  pivot_longer(cols = -c(Municipality, County), names_to = "Year", values_to = "population")
+
+
+nj_population <- rbind(nj_1980_long, nj_1990_long, nj_2000_long, nj_2010_long, nj_2020_long)
+
+nj_population <- nj_population %>%
+  arrange(Municipality,year)
+
+nj_population <- nj_population %>%
+  mutate(
+    Place_Name_Clean = str_to_lower(Municipality),
+    Place_Name_Clean = str_replace(Place_Name_Clean, regex("(city|borough|township|village|town) \\1$", ignore_case = TRUE), "\\1")
+  )
+
+
+
+
 
 
