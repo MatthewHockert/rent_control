@@ -30,25 +30,7 @@ nj_permits <- read.csv(
 library(dplyr)
 library(ggplot2)
 
-folder_path <- "/Users/matthewhockert/Desktop/Personal Info/rent_control/downloads/Northeast_Region"
-
-parse_survey_date <- function(x) {
-  if (is.na(x)) return(NA)
-  x <- as.character(x)
-  n <- nchar(x)
-  
-  if (n == 4) {
-    year <- as.integer(substr(x, 1, 2))
-    month <- as.integer(substr(x, 3, 4))
-    full_year <- ifelse(year >= 80, 1900 + year, 2000 + year)
-    return(as.Date(sprintf("%04d-%02d-01", full_year, month)))
-  } else if (n == 6) {
-    return(as.Date(paste0(x, "01"), format = "%Y%m%d"))
-  } else {
-    return(NA)
-  }
-}
-
+folder_path <- "/Users/matthewhockert/Desktop/Personal Info/rent_control/rent_control/downloads/bps/Northeast_Region"
 
 read_permit_file <- function(path) {
   lines <- readLines(path, n = 2)
@@ -74,7 +56,7 @@ read_permit_file <- function(path) {
 }
 
 # Load files
-files <- list.files(folder_path, pattern = "y\\.txt$", full.names = TRUE)
+files <- list.files(folder_path, pattern = "(a)\\.txt$", full.names = TRUE)
 nj_data_list <- lapply(files, read_permit_file)
 
 # Get union of all column names
@@ -103,6 +85,7 @@ nj_all <- bind_rows(nj_data_list)
 beep()
 
 
+
 # Optional fixes for character formatting
 # nj_all2 <- nj_all %>%
 #   mutate(
@@ -112,21 +95,37 @@ beep()
 #     Year = format(Date, "%Y")
 #   )
 nj_all <- filter(nj_all, State_Code == "34")
+
+print(unique(nj_all$Survey_Date))
+
+parse_survey_date <- function(x) {
+  if (grepl("^\\d{4}$", x)) {
+    prefix <- substr(x, 1, 2)
+    if (as.numeric(prefix) >= 80 & as.numeric(prefix) <= 99) {
+      return(as.numeric(paste0("19", prefix)))
+    } else {
+      return(as.numeric(x))
+    }
+  } else {
+    return(NA)
+  }
+}
+
 nj_all2 <- nj_all %>%
   mutate(
-    Zip_Code = as.character(Zip_Code),
-    Survey_Date = as.character(Survey_Date),
-    Date = as.Date(sapply(Survey_Date, parse_survey_date)),
-    Date = `names<-`(Date, NULL),
-    Year = as.numeric(format(Date, "%Y"))
+    Year = sapply(Survey_Date, parse_survey_date)
   )
 print(unique(nj_all2$Year))
 beep()
 
+print(unique(nj_all2$Place_Name))
+
+
+
+
+
 nj_all2 %>%
-  filter(Place_Name == "Woodland Park Borough") %>%
-  pull(Year) %>%
-  range()
+  filter(Place_Name == "Woodland Park Borough")
 
 nj_all2 <- nj_all2 %>%
   rename(
@@ -170,16 +169,29 @@ nj_all2 <- nj_all2 %>%
 names(nj_all)
 
 clean_place_name <- function(x) {
-  x <- gsub("\\.+", "", x)           # remove all periods
-  x <- gsub("#", "", x) 
-  x <- trimws(x)                       # remove leading/trailing whitespace
-  x <- stringr::str_to_lower(x)        # capitalize first letter of each word
+  x <- gsub("\\(.*?\\)", "", x)
+  x <- gsub("\\.+", "", x)
+  x <- gsub("#", "", x)
+  x <- stringr::str_to_lower(x)
+  x <- trimws(x)
+  x <- gsub("\\btwp\\b", "township", x)
+  x <- gsub("\\bboro\\b", "borough", x)
+  x <- gsub("\\bvil\\b", "village", x)
+  x <- gsub("\\bcity of ", "", x)
+  x <- gsub("\\btownship township\\b", "township", x)
+  x <- gsub("\\bborough borough\\b", "borough", x)
+  x <- gsub("\\btown town\\b", "town", x)
+  x <- gsub("\\bvillage village\\b", "village", x)
+  x <- gsub("\\s+", " ", x)
   return(x)
 }
 nj_all2 <- nj_all2 %>%
   mutate(
     Place_Name_Clean = clean_place_name(Place_Name)
   )
+
+print(unique(nj_all2$Place_Name_Clean))
+
 # 
 # nj_all2 <- nj_all2 %>%
 #   mutate(
@@ -235,8 +247,11 @@ nj_all_updated <- nj_allx %>%
       tolower(Place_Name_Clean) %in% c("south belmar borough") ~ "lake como borough",
       tolower(Place_Name_Clean) %in% c("pine valley borough") ~ "pine hill borough",
       tolower(Place_Name_Clean) %in% c("toms river town") ~ "toms river township",
-      tolower(Place_Name_Clean) %in% c("washington township") & County_Code == 21 ~ "robbinsville township",
+      tolower(Place_Name_Clean) %in% c("washington township") & County_Name == "Mercer" ~ "robbinsville township",
       tolower(Place_Name_Clean) %in% c("peapack and gladstone boro") ~ "peapack and gladstone borough",
+      tolower(Place_Name_Clean) %in% c("orange") ~ "city of orange township",
+      tolower(Place_Name_Clean) %in% c("south orange village") ~ "south orange village township",
+      tolower(Place_Name_Clean) %in% c("west orange town") ~ "west orange township",
       tolower(Place_Name_Clean) %in% c("orange township city") ~ "city of orange township",
       tolower(Place_Name_Clean) %in% c("orange township") ~ "city of orange township",
       tolower(Place_Name_Clean) %in% c("orange township city") ~ "city of orange township",
@@ -251,13 +266,26 @@ nj_all_updated <- nj_allx %>%
       tolower(Place_Name_Clean) %in% c("passaic township") ~ "long hill township",
       tolower(Place_Name_Clean) %in% c("essex fells township") ~ "essex fells borough",
       tolower(Place_Name_Clean) %in% c("westhampton township") ~ "westampton township",
-      TRUE ~ Place_Name_Clean
-    )
-  ) %>%
-  group_by(Place_Name_Clean, Date, Year) %>%
+      tolower(Place_Name_Clean) %in% c("belleville town") ~ "belleville township",
+      tolower(Place_Name_Clean) %in% c("bloomfield town") ~ "bloomfield township",
+      tolower(Place_Name_Clean) %in% c("nutley town") ~ "nutley township",
+      tolower(Place_Name_Clean) %in% c("verona borough") ~ "verona township",
+      tolower(Place_Name_Clean) %in% c("west caldwell borough") ~ "west caldwell township",
+      tolower(Place_Name_Clean) %in% c("matawan township") ~ "aberdeen township",
+      tolower(Place_Name_Clean) %in% c("irvington town") ~ "irvington township",
+      tolower(Place_Name_Clean) %in% c("montclair town") ~ "montclair township",
+      TRUE ~ Place_Name_Clean)
+    )%>%
+  group_by(Place_Name_Clean, Year) %>%
   summarise(across(where(is.numeric), ~ sum(.x, na.rm = TRUE)),
             County_Name = first(County_Name),.groups = "drop")
   
+
+nj_all_updated %>%
+  group_by(Place_Name_Clean) %>%
+  summarise(num_years = n_distinct(Year)) %>%
+  arrange(num_years)%>%
+  print(n=1000)
 
 names(nj_all_updated)
 nj_all_updated <- nj_all_updated %>%
@@ -267,18 +295,15 @@ nj_all_updated <- nj_all_updated %>%
   group_by(Place_Name_Clean)%>%
   filter(Year < 2025)
 
-nj_all_updated <- nj_all_updated %>%
-  group_by(Place_Name_Clean) %>%
-  mutate(across(
-    c(State_Code, Place_ID, County_Code, Place_Code, MSA_CMSA, PMSA_Code, Central_City),
-    ~ ifelse(.x == 0 & any(.x != 0, na.rm = TRUE), max(.x[.x != 0], na.rm = TRUE), .x)
-  )) %>%
-  ungroup()
+# nj_all_updated <- nj_all_updated %>%
+#   group_by(Place_Name_Clean) %>%
+#   mutate(across(
+#     c(State_Code, Place_ID, County_Code, MSA_CMSA, PMSA_Code, Central_City),
+#     ~ ifelse(.x == 0 & any(.x != 0, na.rm = TRUE), max(.x[.x != 0], na.rm = TRUE), .x)
+#   )) %>%
+#   ungroup()
 
-nrow(nj_all_updated)
-nj_all_updated <- nj_all_updated %>%
-  mutate(month = month(Date)) %>%
-  filter(month == 12)
+
 nrow(nj_all_updated)
 
 nj_all_updated %>%
@@ -288,29 +313,28 @@ nj_all_updated %>%
   print(n=1000)
 
 nj_all_updated %>%
-  group_by(Place_Name_Clean, Date) %>%
+  group_by(Place_Name_Clean, Year) %>%
   filter(n() > 1) %>%
   summarise(dup_count = n(), .groups = "drop")
 
 nj_all_updated %>%
-  filter(Place_Name_Clean == "Newark", Year == "1998") %>%
-  select(Place_Name_Clean, Date, single_family, multi_family)
+  filter(Place_Name_Clean == "newark", Year == "1998") %>%
+  select(Place_Name_Clean, Year, single_family, multi_family)
 
 nj_all_updated %>%
-  filter(Place_Name_Clean == "Newark",Year == "2006") %>%
+  filter(Place_Name_Clean == "newark",Year == "2006") %>%
   duplicated() %>%
   sum()
 
 nj_all_updated %>%
-  filter(Place_Name_Clean == "Newark", Year == "2006") %>%
+  filter(Place_Name_Clean == "newark", Year == "2006") %>%
   group_by(Year) %>%
   summarise(n_obs = n(),
             sf_units = sum(single_family, na.rm = TRUE),
             mf_units = sum(multi_family, na.rm = TRUE))
 
 #follows a cummulative pattern
-nj_all_updated <- nj_all_updated %>%
-  mutate(Year2 = format(Date, "%Y"))
+
 
 nj_all_updated %>%
   #filter(Year >= 2010, Year <= 2015) %>%

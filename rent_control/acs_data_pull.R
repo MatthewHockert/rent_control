@@ -439,9 +439,140 @@ nj_population <- nj_population %>%
     Place_Name_Clean = str_to_lower(Municipality),
     Place_Name_Clean = str_replace(Place_Name_Clean, regex("(city|borough|township|village|town) \\1$", ignore_case = TRUE), "\\1")
   )
+print(unique(nj_population$County))
+nj_population$County <- gsub("(?i)\\s*County\\b", "", nj_population$County, perl = TRUE)
+nj_population$County_Name <- trimws(nj_population$County)
 
 
+nj_population_updated <- nj_population %>%
+  mutate(
+    Place_Name_Clean = case_when(
+      tolower(Place_Name_Clean) %in% c("princeton township", "princeton borough") ~ "princeton",
+      tolower(Place_Name_Clean) %in% c("west paterson borough") ~ "woodland park borough",
+      tolower(Place_Name_Clean) %in% c("pahaquarry township") ~ "hardwick township",
+      tolower(Place_Name_Clean) %in% c("dover township") & County_Name == "Ocean" ~ "toms river township",
+      tolower(Place_Name_Clean) %in% c("south belmar borough") ~ "lake como borough",
+      tolower(Place_Name_Clean) %in% c("pine valley borough") ~ "pine hill borough",
+      tolower(Place_Name_Clean) %in% c("toms river town") ~ "toms river township",
+      tolower(Place_Name_Clean) %in% c("washington township") & County_Name == "Mercer" ~ "robbinsville township",
+      tolower(Place_Name_Clean) %in% c("peapack and gladstone boro") ~ "peapack and gladstone borough",
+      tolower(Place_Name_Clean) %in% c("orange") ~ "city of orange township",
+      tolower(Place_Name_Clean) %in% c("south orange village") ~ "south orange village township",
+      tolower(Place_Name_Clean) %in% c("west orange town") ~ "west orange township",
+      tolower(Place_Name_Clean) %in% c("orange township city") ~ "city of orange township",
+      tolower(Place_Name_Clean) %in% c("orange township") ~ "city of orange township",
+      tolower(Place_Name_Clean) %in% c("pahaquarry township (n)") ~ "hardwick township",
+      tolower(Place_Name_Clean) %in% c("walpack township (n)") ~ "walpack township",
+      tolower(Place_Name_Clean) %in% c("carney's point township") ~ "carneys point township",
+      tolower(Place_Name_Clean) %in% c("hawthorn borough") ~ "hawthorne borough",
+      tolower(Place_Name_Clean) %in% c("verona borough township") ~ "verona township",
+      tolower(Place_Name_Clean) %in% c("glen ridge borough township") ~ "glen ridge borough",
+      tolower(Place_Name_Clean) %in% c("orange city township") ~ "city of orange township",
+      tolower(Place_Name_Clean) %in% c("glen ridge township") ~ "glen ridge borough",
+      tolower(Place_Name_Clean) %in% c("north caldwell township") ~ "north caldwell borough",
+      tolower(Place_Name_Clean) %in% c("caldwell borough township") ~ "caldwell borough",
+      tolower(Place_Name_Clean) %in% c("passaic township") ~ "long hill township",
+      tolower(Place_Name_Clean) %in% c("essex fells township") ~ "essex fells borough",
+      tolower(Place_Name_Clean) %in% c("westhampton township") ~ "westampton township",
+      tolower(Place_Name_Clean) %in% c("belleville town") ~ "belleville township",
+      tolower(Place_Name_Clean) %in% c("bloomfield town") ~ "bloomfield township",
+      tolower(Place_Name_Clean) %in% c("nutley town") ~ "nutley township",
+      tolower(Place_Name_Clean) %in% c("verona borough") ~ "verona township",
+      tolower(Place_Name_Clean) %in% c("west caldwell borough") ~ "west caldwell township",
+      tolower(Place_Name_Clean) %in% c("matawan township") ~ "aberdeen township",
+      tolower(Place_Name_Clean) %in% c("irvington town") ~ "irvington township",
+      tolower(Place_Name_Clean) %in% c("montclair town") ~ "montclair township",
+      tolower(Place_Name_Clean) %in% c("absecon city") ~ "absecon",
+      tolower(Place_Name_Clean) %in% c("asbury park city") ~ "asbury park",
+      tolower(Place_Name_Clean) %in% c("bayonne city") ~ "bayonne",
+      tolower(Place_Name_Clean) %in% c("beverly city") ~ "beverly",
+      tolower(Place_Name_Clean) %in% c("bordentown city") ~ "bordentown",
+      tolower(Place_Name_Clean) %in% c("bridgeton city") ~ "bridgeton",
+      tolower(Place_Name_Clean) %in% c("brigantine city") ~ "brigantine",
+      tolower(Place_Name_Clean) %in% c("burlington city") ~ "burlington",
+      tolower(Place_Name_Clean) %in% c("camden city") ~ "camden",
+      TRUE ~ Place_Name_Clean
+    )
+  ) %>%
+  group_by(Place_Name_Clean, Year) %>%
+  summarise(across(where(is.numeric), ~ sum(.x, na.rm = TRUE)),
+            County_Name = first(County_Name),
+            .groups = "drop")
+nj_population_updated$Place_Name_Clean <- nj_population_updated$Place_Name_Clean %>%
+  tolower() %>%
+  gsub("^asbury park city$", "asbury park", .) %>%
+  gsub("^bayonne city$", "bayonne", .) %>%
+  gsub("^beverly city$", "beverly", .) %>%
+  gsub("^bordentown city$", "bordentown", .) %>%
+  gsub("^bridgeton city$", "bridgeton", .) %>%
+  gsub("^brigantine city$", "brigantine", .) %>%
+  gsub("^burlington city$", "burlington", .) %>%
+  gsub("^camden city$", "camden", .) %>%
+  gsub("^cape may city$", "cape may", .) %>%
+  gsub("^clifton city$", "clifton", .) %>%
+  gsub("^east orange city$", "east orange", .) %>%
+  gsub("^elizabeth city$", "elizabeth", .) %>%
+  gsub("^englewood city$", "englewood", .) %>%
+  gsub("^estell manor city$", "estell manor", .) %>%
+  gsub("^fairfield city$", "fairfield", .) %>%
+  gsub("^garfield city$", "garfield", .) %>%
+  gsub("^hackensack city$", "hackensack", .) %>%
+  gsub("^hoboken city$", "hoboken", .) %>%
+  gsub("^lambertville city$", "lambertville", .) %>%
+  gsub("^linden city$", "linden", .) %>%
+  gsub("^linwood city$", "linwood", .) %>%
+  gsub("^long branch city$", "long branch", .) %>%
+  gsub("^millville city$", "millville", .) %>%
+  gsub("^new brunswick city$", "new brunswick", .) %>%
+  gsub("^newark city$", "newark", .) %>%
+  gsub("^north wildwood city$", "north wildwood", .) %>%
+  gsub("^northfield city$", "northfield", .) %>%
+  gsub("^passaic city$", "passaic", .) %>%
+  gsub("^paterson city$", "paterson", .) %>%
+  gsub("^perth amboy city$", "perth amboy", .) %>%
+  gsub("^plainfield city$", "plainfield", .) %>%
+  gsub("^pleasantville city$", "pleasantville", .) %>%
+  gsub("^port republic city$", "port republic", .) %>%
+  gsub("^rahway city$", "rahway", .) %>%
+  gsub("^salem city$", "salem", .) %>%
+  gsub("^somers point city$", "somers point", .) %>%
+  gsub("^south amboy city$", "south amboy", .) %>%
+  gsub("^summit city$", "summit", .) %>%
+  gsub("^trenton city$", "trenton", .) %>%
+  gsub("^vineland city$", "vineland", .) %>%
+  gsub("^wildwood city$", "wildwood", .) %>%
+  gsub("^woodbury city$", "woodbury", .)
 
+print(unique(nj_population$County))
+
+nj_population_updated_cleaned <- nj_population_updated %>%
+  filter(!Place_Name_Clean %in% unique(nj_population_updated$County_Name))
+
+
+nj_counties <- tolower(c(
+  "Atlantic", "Bergen", "Burlington", "Camden", "Cape May", "Cumberland",
+  "Essex", "Gloucester", "Hudson", "Hunterdon", "Mercer", "Middlesex",
+  "Monmouth", "Morris", "Ocean", "Passaic", "Salem", "Somerset",
+  "Sussex", "Union", "Warren"
+))
+nj_counties <- paste(nj_counties, "county")
+
+
+nj_population_updated_cleaned <- nj_population_updated_cleaned %>%
+  filter(!Place_Name_Clean %in% nj_counties)
+
+nj_population_updated_cleaned <- nj_population_updated_cleaned %>%
+  mutate(Place_Name_Clean = case_when(
+    Place_Name_Clean == "hackettstown" ~ "hackettstown town",
+    Place_Name_Clean == "morristown" ~ "morristown town",
+    TRUE ~ Place_Name_Clean
+  ))
+
+nj_population_updated_cleaned <- nj_population_updated_cleaned %>%
+  mutate(County_Name = str_replace_all(County_Name, "'$", ""))%>%
+  group_by(Place_Name_Clean) %>%
+  tidyr::fill(County_Name, .direction = "updown") %>%
+  ungroup()
 
 
 

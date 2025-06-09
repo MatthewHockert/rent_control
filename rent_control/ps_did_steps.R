@@ -8,6 +8,15 @@ panelview(turnout ~ policy_edr + policy_mail_in + policy_motor,
           data = turnout, index = c("abb","year"), 
           xlab = "Year", ylab = "State")
 
+cs_data$treatment <- ifelse(cs_data$Year >= cs_data$G, 1, 0)
+panelview(
+  formula = treatment ~ 1,
+  data = cs_data,
+  index = c("Place_Name_Clean", "Year"),
+  type = "treat",
+  xlab = "Year",
+  ylab = "Municipality"
+)
 
 table(cs_data$G)
 table(table(cs_data$id))
@@ -53,7 +62,7 @@ treated <- panel_data %>%
   filter(G !=0)
 
 panelview(Y ~ D_post,
-          data = treated,
+          data = panel_data,
           index = c("id", "Year"),
           type = "treat",
           by.timing = TRUE)

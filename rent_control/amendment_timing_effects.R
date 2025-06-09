@@ -57,7 +57,7 @@ con_stag_year <- con_stag %>%
 nrow(con_stag_year)
 # print(unique(con_stag_year$Place_Name_Clean))
 # print(unique(city_population_by_year$Place_Name_Clean))
-names(which(table(con_stag_year$Place_Name_Clean) != 37))
+names(which(table(con_stag_year$Place_Name_Clean) != 45))
 #colSums(is.na(con_stag_year))
 
 
@@ -79,10 +79,49 @@ con_stag_year %>%
   theme_minimal()
 
 nrow(con_stag_year)
-con_stag_year_pop <- con_stag_year
-#con_stag_year_pop <- merge(con_stag_year,nj_pop_all3,by=c("Place_Name_Clean","County_Name","Year"))
+nj_population_updated_cleaned$Year <- as.numeric(nj_population_updated_cleaned$Year)
+# con_stag_year_pop <- con_stag_year
+con_stag_year_pop <- merge(con_stag_year,nj_population_updated_cleaned,by=c("Place_Name_Clean","County_Name","Year"))
 nrow(con_stag_year_pop)
-names(which(table(con_stag_year_pop$Place_Name_Clean) != 37))
+names(which(table(con_stag_year_pop$Place_Name_Clean) != 45))
+
+nrow(con_stag_year)-nrow(con_stag_year_pop)
+
+anti <- anti_join(
+  con_stag_year_pop,
+  nj_population_updated_cleaned,
+  by = c("Place_Name_Clean", "County_Name", "Year")
+)
+
+anti_subset <- anti %>% select(Place_Name_Clean, County_Name, Year)
+print(unique(anti_subset$Place_Name_Clean))
+
+missing_rows <- anti_join(nj_population_updated_cleaned, con_stag_year_pop, 
+                          by = c("Place_Name_Clean", "County_Name", "Year"))
+
+print(unique(missing_rows$Place_Name_Clean))
+
+
+library(dplyr)
+
+anti_matches <- con_stag_year %>%
+  anti_join(nj_population_updated_cleaned, by = c("Place_Name_Clean", "County_Name", "Year"))
+
+# Review distinct failed matches
+distinct_mismatches <- anti_matches %>%
+  select(Place_Name_Clean, County_Name, Year) %>%
+  distinct()
+
+print(distinct_mismatches,n=200)
+
+problem_places <- unique(anti_matches$Place_Name_Clean)
+
+for (place in problem_places) {
+  cat("\n--- Checking:", place, "---\n")
+  print(nj_population_updated_cleaned %>%
+          filter(Place_Name_Clean == place) %>%
+          select(Place_Name_Clean, County_Name, Year))
+}
 
 
 con_stag_year_pop <- con_stag_year_pop %>%
@@ -111,11 +150,11 @@ anti_join(
   nj_muni_df,
   by = c("Place_Name_Clean" = "Municipality_Clean", "County_Name" = "County_Name")
 )
-
+con_stag_year2 <- con_stag_year_pop
 nrow(con_stag_year_pop)
-con_stag_year2 <- merge(con_stag_year_pop, nj_muni_df_improved,by.x = c("Place_Name_Clean",'County_Name',"Year"), by.y=c("name_con",'County_Name',"Year"))
+# con_stag_year2 <- merge(con_stag_year_pop, nj_muni_df_improved,by.x = c("Place_Name_Clean",'County_Name',"Year"), by.y=c("name_con",'County_Name',"Year"))
 nrow(con_stag_year2)
-names(which(table(con_stag_year2$Place_Name_Clean) != 37))
+names(which(table(con_stag_year2$Place_Name_Clean) != 45))
 
 missing_nj_muni_con_stag <- anti_join(
   con_stag_year_pop,
@@ -268,22 +307,25 @@ cs_data <- cs_data %>%
   )
 
 att_gt_results <- att_gt(
-  yname = "single_family_sum",
+  yname = "Y",
   tname = "Year",
   idname = "id",
   gname = "G",
-  xformla = ~ County_Name + MUN_TYPE + size_bin,
+  #xformla = ~ County_Name,
   control_group = "notyettreated",
-  data = cs_data_class %>% filter(G==0|mf_class == "High MF"),
-  #panel = T,
-  allow_unbalanced_panel = T,
-  est_method = "reg",
-  anticipation = 1
+  data = cs_data,
+  panel = T,
+  #allow_unbalanced_panel = T,
+  est_method = "reg"
 )
 
 es_results <- aggte(att_gt_results, type = "dynamic",na.rm = TRUE)
 summary(es_results)
 ggdid(es_results)
+
+
+
+
 
 es_results_trimmed <- aggte(
   att_gt_results,
