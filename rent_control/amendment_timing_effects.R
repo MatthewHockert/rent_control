@@ -152,7 +152,7 @@ anti_join(
 )
 con_stag_year2 <- con_stag_year_pop
 nrow(con_stag_year_pop)
-# con_stag_year2 <- merge(con_stag_year_pop, nj_muni_df_improved,by.x = c("Place_Name_Clean",'County_Name',"Year"), by.y=c("name_con",'County_Name',"Year"))
+con_stag_year2 <- merge(con_stag_year_pop, nj_muni_df_filled,by.x = c("Place_Name_Clean",'County_Name',"Year"), by.y=c("name_con",'County_Name',"Year"))
 nrow(con_stag_year2)
 names(which(table(con_stag_year2$Place_Name_Clean) != 45))
 
@@ -200,8 +200,9 @@ ggplot(con_stag_long, aes(x = Year, y = permits, color = unit_type, group = unit
   theme(legend.position = "top")
 
 
-ggplot(con_stag_year2 %>% filter(Place_Name_Clean %in% c("newark", "jersey city","hoboken","cape may point borough")), aes(x = Year, y = log_mf_sum, color = Place_Name_Clean, group = Place_Name_Clean)) +
+ggplot(con_stag_year2 %>% filter(Place_Name_Clean %in% c("elizabeth")), aes(x = Year, y = log_mf_sum, color = Place_Name_Clean, group = Place_Name_Clean)) +
   stat_summary(fun = mean, geom = "line", size = 1.2) +
+  geom_vline(aes(xintercept = 2008), linetype = "dashed", color = "red") +
   labs(
     title = "Multi-Family Permitting Trends",
     subtitle = "Mean annual permits by city per 1000 people",
@@ -281,15 +282,20 @@ cs_data <- con_stag_year2 %>%
     time = as.numeric(Year),
     G = G,
     Y = log_mf_sum,
-    Y2 = multi_family_sum
+    Y2 = multi_family_sum,
+    Y3 = mf_permits_per_1000
   )
-names(which(table(cs_data$Place_Name_Clean) != 37))
+names(which(table(cs_data$Place_Name_Clean) != 45))
 
-cs_data <- cs_data %>%
-  arrange(Place_Name_Clean,Year)%>%
-  group_by(Place_Name_Clean)%>%
-  mutate(event_time = ifelse(G > 0, Year - G, NA_integer_))%>%
-  filter(is.na(event_time) | (event_time >= -10 & event_time <= 10))
+hist(cs_data$Y)
+hist(cs_data$Y2)
+hist(cs_data$Y3)
+
+# cs_data <- Y2# cs_data <- cs_data %>%
+#   arrange(Place_Name_Clean,Year)%>%
+#   group_by(Place_Name_Clean)%>%
+#   mutate(event_time = ifelse(G > 0, Year - G, NA_integer_))%>%
+#   filter(is.na(event_time) | (event_time >= -10 & event_time <= 10))
 
 table(table(cs_data$id))
 table(cs_data$G)
@@ -305,18 +311,24 @@ cs_data <- cs_data %>%
       G > 2010 ~ 3    # late adopters
     )
   )
-
+# exclude_places <- c(
+#   "Haddonfield borough",
+#   "Pine Hill borough",
+#   "Byram township"
+# )
+#2000
 att_gt_results <- att_gt(
-  yname = "Y",
+  yname = "mf_permits_per_1000",
   tname = "Year",
   idname = "id",
   gname = "G",
-  #xformla = ~ County_Name,
+  xformla = ~ County_Name + MUN_TYPE+size_bin,
   control_group = "notyettreated",
-  data = cs_data,
+  data = merged_test %>%  filter(consistent_reporter == TRUE | (consistent_reporter == FALSE & low_reporter == FALSE)),
   panel = T,
   #allow_unbalanced_panel = T,
-  est_method = "reg"
+  est_method = "dr",
+  anticipation=1
 )
 
 es_results <- aggte(att_gt_results, type = "dynamic",na.rm = TRUE)
@@ -324,8 +336,65 @@ summary(es_results)
 ggdid(es_results)
 
 
+aggte_results <- aggte(
+  att_gt_results,
+  type = "dynamic",      # or "group" or "calendar"
+  cband = TRUE,          # confidence band
+  bstrap = TRUE,         # bootstrap
+  biters = 500           # number of bootstrap iterations
+)
+summary(aggte_results)
+ggdid(aggte_results)
 
 
+summary(aggte(aggte_results, type = "simple"))
+ggdid(aggte(att_gt_results, type = "group"))
+
+
+##### bayesian ----
+
+df_test <- merged_test %>%
+  filter(G == 0 | G > 1950) %>%
+  mutate(
+    treated = ifelse(G > 0 & Year >= G, 1, 0),
+    event_time = ifelse(G > 0, Year - G, NA)
+  )
+
+print(unique(df_test$event_time))
+library(brms)
+model <- brm(
+  mf_permits_per_1000 ~ 
+    s(event_time, by = treated, k = 10) + 
+    (1 | id) + (1 | Year),
+  data = df_test %>% filter(!is.na(event_time)),
+  family = gaussian(),
+  cores = 4, chains = 4, iter = 2000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15)
+)
+summary(model)
+beep()
+library(tidybayes)
+library(ggplot2)
+
+df_plot <- df %>%
+  filter(treated == 1, !is.na(event_time)) %>%
+  distinct(event_time) %>%
+  mutate(treated = 1) %>%  # restore the column
+  add_epred_draws(model, newdata = ., re_formula = NA)
+
+df_plot %>%
+  group_by(event_time) %>%
+  median_qi(.epred) %>%
+  ggplot(aes(x = event_time, y = .epred)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = .lower, ymax = .upper), alpha = 0.2) +
+  labs(title = "Estimated Dynamic Treatment Effect",
+       x = "Event Time (years since treatment)", y = "Effect on Permits")
+
+
+
+
+#
 
 es_results_trimmed <- aggte(
   att_gt_results,

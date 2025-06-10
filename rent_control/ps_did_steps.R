@@ -13,7 +13,7 @@ panelview(
   formula = treatment ~ 1,
   data = cs_data,
   index = c("Place_Name_Clean", "Year"),
-  type = "treat",
+  type = "missing",
   xlab = "Year",
   ylab = "Municipality"
 )
@@ -68,6 +68,50 @@ panelview(Y ~ D_post,
           by.timing = TRUE)
 
 
+##### personal panelview ----
+cs_data$treatment <- ifelse(cs_data$Year >= cs_data$G, 1, 0)
+
+# Keep only treated units
+treated_units <- cs_data %>%
+  group_by(Place_Name_Clean) %>%
+  filter(any(treatment == 1)) %>%
+  ungroup()
+
+# Determine first treatment year and order
+unit_order <- treated_units %>%
+  group_by(Place_Name_Clean) %>%
+  summarize(first_treat = min(Year[treatment == 1])) %>%
+  arrange(first_treat, Place_Name_Clean) %>%
+  mutate(Place_Name_Clean = factor(Place_Name_Clean, levels = rev(Place_Name_Clean)))
+
+# Join ordering back to data
+treated_data_sorted <- treated_units %>%
+  inner_join(unit_order, by = "Place_Name_Clean") %>%
+  mutate(Place_Name_Clean = factor(Place_Name_Clean, levels = levels(unit_order$Place_Name_Clean)),
+         treatment = as.factor(treatment))
+
+# Plot
+ggplot(treated_data_sorted, aes(x = Year, y = Place_Name_Clean, fill = treatment)) +
+  geom_tile(color = "white", linewidth = 0.1) +
+  scale_fill_manual(values = c("0" = "grey90", "1" = "dodgerblue")) +
+  labs(x = "Year", y = "Municipality", fill = "Treatment") +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 5),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  )
+
+cs_data %>%
+  group_by(Place_Name_Clean) %>%
+  summarize(first_year = min(Year),first_treat = min(G), last_treat = max(Year), n_years = sum(treatment,na.rm = T)) %>%
+  arrange(first_treat,n_years)%>%
+  print(n=1000)
+
+
+
+
+
 #### Step 2 - document treatment cohorts ----
 
 cs_data %>%
@@ -110,7 +154,20 @@ cs_data_filtered %>%
 
 
 #### Step 3 - Pre-trends ----
-
+exclude_places <- c(
+  "haddonfield borough",
+  "pine hill borough",
+  "byram township",
+  "harrison town",
+  "hazlet township",
+  "lindenwold borough",
+  "middlesex borough",
+  "robbinsville township",
+  "roselle borough",
+  "spring lake heights borough",
+  "somerdale borough",
+  "teterboro borough"
+)
 
 panel_data_event <- cs_data %>%
   filter(G != 0) %>%  # only ever-treated units
@@ -163,28 +220,31 @@ panel_data_event %>%
 
 
 panel_data_cohorts <- cs_data %>%
+  filter(!(Place_Name_Clean %in% exclude_places))%>%
   filter(!is.na(G) & G > 0 & G != 1006) %>%  # Only ever-treated
   group_by(G, Year) %>%
-  summarise(mf_outcome = mean(multi_family_sum, na.rm = TRUE),
-            sf_outcome = mean(single_family_sum, na.rm = TRUE),
+  summarise(mf_outcome = mean(mf_permits_per_1000, na.rm = TRUE),
+            sf_outcome = mean(sf_permits_per_1000, na.rm = TRUE),
             G = first(G),
             .groups = "drop") %>%
   mutate(cohort_label = paste0(G, " cohort"))
 
 never_treated <- cs_data %>%
+  filter(!(Place_Name_Clean %in% exclude_places))%>%
   filter(G == 0) %>%
   group_by(Year) %>%
-  summarise(mf_outcome = mean(multi_family_sum, na.rm = TRUE),
-            sf_outcome = mean(single_family_sum, na.rm = TRUE),
+  summarise(mf_outcome = mean(mf_permits_per_1000, na.rm = TRUE),
+            sf_outcome = mean(sf_permits_per_1000, na.rm = TRUE),
             G = first(G),
             .groups = "drop") %>%
   mutate(cohort_label = "never treated", G = NA)
 
 pre_treated <- cs_data %>%
+  filter(!(Place_Name_Clean %in% exclude_places))%>%
   filter(G != 0 &G < Year & G >1950) %>%
   group_by(Year) %>%
-  summarise(mf_outcome = mean(multi_family_sum, na.rm = TRUE),
-            sf_outcome = mean(single_family_sum, na.rm = TRUE),
+  summarise(mf_outcome = mean(mf_permits_per_1000, na.rm = TRUE),
+            sf_outcome = mean(sf_permits_per_1000, na.rm = TRUE),
             .groups = "drop") %>%
   mutate(cohort_label = "Pre Treated", G = NA)
 
@@ -192,7 +252,7 @@ plot_data <- bind_rows(panel_data_cohorts, never_treated, pre_treated)
 plot_data_long <- plot_data %>%
   pivot_longer(cols = c(sf_outcome, mf_outcome), names_to = "outcome_type", values_to = "value")
 
-ggplot(plot_data, aes(x = Year, y = sf_outcome)) +
+ggplot(plot_data, aes(x = Year, y = mf_outcome)) +
   geom_line(color = "blue") +
   geom_vline(aes(xintercept = G), color = "red", linetype = "dashed") +
   facet_wrap(~ cohort_label, scales = "free") +

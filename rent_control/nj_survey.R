@@ -47,6 +47,34 @@ nj_muni_df_improved <- nj_muni_df %>%
   )
 
 
+years <- 1980:max(nj_muni_df_improved$Year, na.rm = TRUE)
+
+municipality_grid <- nj_muni_df_improved %>%
+  distinct(name_con, County_Name) %>%  # only valid pairs
+  crossing(Year = years)               # repeat those pairs across years
+
+nj_muni_df_filled <- municipality_grid %>%
+  left_join(nj_muni_df_improved, by = c("name_con", "County_Name", "Year")) %>%
+  arrange(name_con, County_Name, Year) %>%
+  group_by(name_con, County_Name) %>%
+  fill(NAME, COUNTY, MUN_TYPE, SQ_MILES, Municipality_Clean, .direction = "downup") %>%
+  ungroup()
+
+print(nj_muni_df_expanded_filled,n=100)
+names(nj_muni_df_improved)
+
+permits_city_size_anti_join <- anti_join(
+  con_stag_year_pop,
+  nj_muni_df_filled %>%
+    rename(
+      Place_Name_Clean = name_con
+    ),
+  by = c("Place_Name_Clean", "County_Name", "Year")
+)
+
+min(nj_muni_df_improved$Year,na.rm=T)
+min(con_stag_year_pop$Year,na.rm=T)
+
 
 
 #### Survey Continuous treatment ----
