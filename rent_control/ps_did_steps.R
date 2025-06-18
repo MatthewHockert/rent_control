@@ -219,7 +219,8 @@ panel_data_event %>%
 
 
 
-panel_data_cohorts <- cs_data %>%
+panel_data_cohorts <- merged_test %>%
+  filter(reporting_category == "Consistent Reporter")%>%
   filter(!(Place_Name_Clean %in% exclude_places))%>%
   filter(!is.na(G) & G > 0 & G != 1006) %>%  # Only ever-treated
   group_by(G, Year) %>%
@@ -229,7 +230,8 @@ panel_data_cohorts <- cs_data %>%
             .groups = "drop") %>%
   mutate(cohort_label = paste0(G, " cohort"))
 
-never_treated <- cs_data %>%
+never_treated <- merged_test %>%
+  filter(reporting_category == "Consistent Reporter")%>%
   filter(!(Place_Name_Clean %in% exclude_places))%>%
   filter(G == 0) %>%
   group_by(Year) %>%
@@ -239,7 +241,8 @@ never_treated <- cs_data %>%
             .groups = "drop") %>%
   mutate(cohort_label = "never treated", G = NA)
 
-pre_treated <- cs_data %>%
+pre_treated <- merged_test %>%
+  filter(reporting_category == "Consistent Reporter")%>%
   filter(!(Place_Name_Clean %in% exclude_places))%>%
   filter(G != 0 &G < Year & G >1950) %>%
   group_by(Year) %>%

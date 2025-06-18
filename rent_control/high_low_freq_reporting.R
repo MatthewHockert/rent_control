@@ -204,11 +204,13 @@ monthly_reporting_summary <- monthly_reporting_summary %>%
     reporting_type = case_when(
       months_reported == 12 ~ "monthly_full",
       months_reported >= 6  ~ "monthly_partial",
-      months_reported > 0   ~ "monthly_sparse",
+      months_reported < 6 & months_reported > 0   ~ "monthly_sparse",
       months_reported == 0  ~ "no_reporting"
     )
   )
-
+months_reported %>%
+  group_by(Place_)
+length(unique(monthly_reporting_summary$months_reported))
 
 reporting_summary_by_place <- monthly_reporting_summary %>%
   group_by(Place_Name_Clean) %>%
@@ -224,8 +226,12 @@ reporting_summary_by_place <- monthly_reporting_summary %>%
   mutate(
     consistent_reporter = years_full / years_total >= 0.75,
     low_reporter = years_none / years_total >= 0.5
-  )
+  )%>%
+  mutate(
+    mixed_reporter = !consistent_reporter & !low_reporter,
+    reporting_score = ((1 * years_full + 0.66 * years_partial + 0.33 * years_sparse) / years_total)*100)
 
+table(reporting_summary_by_place$reporting_score)
 
 ##### Visuals ----
 reporting_summary_long <- reporting_summary_by_place %>%
@@ -244,10 +250,9 @@ ggplot(reporting_summary_long, aes(x = count, fill = reporting_type)) +
   ) +
   theme_minimal()
 
-ggplot(reporting_summary_by_place, aes(x = years_full, y = total_units_reported)) +
+ggplot(reporting_summary_by_place, aes(x = years_full, y = log(total_units_reported))) +
   geom_point(alpha = 0.7) +
   geom_smooth(method = "lm", se = FALSE, color = "blue") +
-  scale_y_log10()+
   labs(
     title = "Fully Reported Years vs. Total Units Reported",
     x = "Years with Full (12-month) Reporting",
@@ -277,6 +282,13 @@ ggplot(reporting_flags, aes(x = category)) +
 merged_test <- merge(cs_data,reporting_summary_by_place,by=c("Place_Name_Clean","County_Name"))
 merged_test$treated <- ifelse(merged_test$G > 0,"treated","control")
 
+merged_test <- merged_test %>% 
+  mutate(reporting_category = case_when(
+    consistent_reporter ~ "Consistent Reporter",
+    low_reporter ~ "Low Reporter",
+    TRUE ~ "Mixed Reporter"
+  ))
+
 reporting_summary_long <- merged_test %>%
   pivot_longer(
     cols = c(years_full, years_partial, years_sparse, years_none),
@@ -285,7 +297,7 @@ reporting_summary_long <- merged_test %>%
   )
 
 ggplot(reporting_summary_long, aes(x = count, fill = treated)) +
-  geom_histogram(binwidth = 1, position = "identity", alpha = 0.6) +
+  geom_histogram(aes(y = after_stat(density)),position = "identity", alpha = 0.5, bins = 40,binwidth = 1) +
   facet_wrap(~ reporting_type, scales = "free_y") +
   labs(
     title = "Distribution of Reporting Years by Type (Treated vs. Control)",
@@ -294,7 +306,7 @@ ggplot(reporting_summary_long, aes(x = count, fill = treated)) +
   ) +
   theme_minimal()
 
-ggplot(merged_test, aes(x = years_full, y = total_units_reported, color = treated)) +
+ggplot(merged_test, aes(x = years_full, y = log(total_units_reported+1), color = treated)) +
   geom_point(alpha = 0.7) +
   geom_smooth(method = "lm", se = FALSE) +
   labs(
@@ -304,14 +316,49 @@ ggplot(merged_test, aes(x = years_full, y = total_units_reported, color = treate
   ) +
   theme_minimal()
 
-reporting_flags <- merged_test %>%
-  mutate(category = case_when(
-    consistent_reporter ~ "Consistent Reporter",
-    low_reporter ~ "Low Reporter",
-    TRUE ~ "Mixed Reporter"
-  ))
 
-ggplot(reporting_flags, aes(x = category, fill = treated)) +
+# Treated do before an after treatment
+
+
+
+
+
+
+
+
+
+ggplot(merged_test, aes(x = reporting_score, y = log(total_units_reported+1), color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Fully Reported Years vs. Total Units Reported (by Treatment)",
+    x = "Reporting score",
+    y = "Total Housing Units Reported"
+  ) +
+  theme_minimal()
+
+ggplot(merged_test, aes(x = reporting_score, y = (years_full), color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Fully Reported Years vs. years fully reported",
+    x = "Reporting score",
+    y = "years fully reported"
+  ) +
+  theme_minimal()
+
+ggplot(merged_test, aes(x = years_full, y = reporting_score, color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~reporting_category)+
+  labs(
+    title = "Fully Reported Years vs. Total Units Reported (by Treatment)",
+    x = "Years with Full (12-month) Reporting",
+    y = "Total Housing Units Reported"
+  ) +
+  theme_minimal()
+
+ggplot(merged_test, aes(x = reporting_category, fill = treated)) +
   geom_bar(position = "dodge") +
   labs(
     title = "Number of Cities by Reporting Category and Treatment",
@@ -321,5 +368,25 @@ ggplot(reporting_flags, aes(x = category, fill = treated)) +
   theme_minimal()
 
 
-summary(lm(Y3 ~ treated,merged_test %>% filter(consistent_reporter==T)))
+summary(lm(log(total_units_reported+1) ~ treated*reporting_score + factor(Year),merged_test))
+summary(lm(sf_log_permits_per_1000 ~ treated*reporting_category, data = merged_test))
+
+
+reporting_treatment_table <- merged_test %>%
+  distinct(Place_Name_Clean, treated, reporting_category) %>%
+  count(treated, reporting_category)%>%
+  arrange(reporting_category)
+
+# Print the table
+print(reporting_treatment_table)
+
+merged_test %>%
+  filter(reporting_category == "Consistent Reporter") %>%
+  distinct(Place_Name_Clean, treated) %>%
+  arrange(treated,Place_Name_Clean)
+
+
+
+
+
 

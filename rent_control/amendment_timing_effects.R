@@ -1,5 +1,5 @@
 library(did)
-
+library(sunab)
 # 1.	 Amendments that impact permitting
 nrow(nj_all_updated)
 nrow(con_stag)
@@ -182,7 +182,7 @@ ggplot(con_stag_year2, aes(x = Year, y = log_mf_sum,group=adoption_group, color 
 
 con_stag_long <- con_stag_year2 %>%
   pivot_longer(
-    cols = c(log_mf_sum, log_sf_sum),
+    cols = c(mf_permits_per_1000, sf_permits_per_1000),
     names_to = "unit_type",
     values_to = "permits"
   )
@@ -200,9 +200,10 @@ ggplot(con_stag_long, aes(x = Year, y = permits, color = unit_type, group = unit
   theme(legend.position = "top")
 
 
-ggplot(con_stag_year2 %>% filter(Place_Name_Clean %in% c("elizabeth")), aes(x = Year, y = log_mf_sum, color = Place_Name_Clean, group = Place_Name_Clean)) +
+ggplot(con_stag_year2 %>% filter(Place_Name_Clean %in% c("hoboken","jersey city")), aes(x = Year, y = mf_permits_per_1000, color = Place_Name_Clean, group = Place_Name_Clean)) +
   stat_summary(fun = mean, geom = "line", size = 1.2) +
-  geom_vline(aes(xintercept = 2008), linetype = "dashed", color = "red") +
+  geom_vline(aes(xintercept = 1985), linetype = "dashed", color = "red") +
+  geom_vline(aes(xintercept = 1987), linetype = "dashed", color = "blue") +
   labs(
     title = "Multi-Family Permitting Trends",
     subtitle = "Mean annual permits by city per 1000 people",
@@ -317,20 +318,24 @@ cs_data <- cs_data %>%
 #   "Byram township"
 # )
 #2000
+merged_test$ihs_mf_permits_per_1000 <- asinh(merged_test$mf_permits_per_1000)
+merged_test$log_population <- log(merged_test$population)
+hist(merged_test$population)
+# merged_test$mf_log_permits_per_1000
 att_gt_results <- att_gt(
   yname = "mf_permits_per_1000",
   tname = "Year",
   idname = "id",
   gname = "G",
-  xformla = ~ County_Name + MUN_TYPE+size_bin,
+  #xformla = ~ County_Name + MUN_TYPE+size_bin,
   control_group = "notyettreated",
-  data = merged_test %>%  filter(consistent_reporter == TRUE | (consistent_reporter == FALSE & low_reporter == FALSE)),
-  panel = T,
+  data = merged_test %>% filter(G>0),
+  #panel = T,
   #allow_unbalanced_panel = T,
   est_method = "dr",
-  anticipation=1
+  anticipation = 1
 )
-
+#table(merged_test$G)
 es_results <- aggte(att_gt_results, type = "dynamic",na.rm = TRUE)
 summary(es_results)
 ggdid(es_results)
@@ -341,7 +346,8 @@ aggte_results <- aggte(
   type = "dynamic",      # or "group" or "calendar"
   cband = TRUE,          # confidence band
   bstrap = TRUE,         # bootstrap
-  biters = 500           # number of bootstrap iterations
+  biters = 500 ,          # number of bootstrap iterations
+  na.rm=T
 )
 summary(aggte_results)
 ggdid(aggte_results)
@@ -351,7 +357,81 @@ summary(aggte(aggte_results, type = "simple"))
 ggdid(aggte(att_gt_results, type = "group"))
 
 
-##### bayesian ----
+####Fixest ----
+library(fixest)
+merged_test_fixest <- merged_test %>%
+  mutate(
+    event_time = ifelse(G > 0, Year - G, NA))
+
+hist(merged_test_fixest$mf_permits_per_1000)
+summary(merged_test_fixest$mf_permits_per_1000)
+
+hist(merged_test_fixest$mf_log_permits_per_1000)
+summary(merged_test_fixest$mf_log_permits_per_1000)
+#%>%  filter(consistent_reporter == TRUE)
+
+sa20 = feols(
+  (mf_permits_per_1000) ~ sunab(G, event_time)| id + Year+ County_Name + MUN_TYPE+size_bin, 
+  data = merged_test_fixest
+)
+summary(sa20)
+
+sa20 |>
+  iplot(
+    main     = "fixest::sunab",
+    xlab     = "Time to treatment",
+    ref.line = -1
+  )
+
+etable(sa20, agg = "att")
+
+
+
+
+
+cs_df <- data.frame(
+  time = es_results$egt,
+  estimate = es_results$att.egt,
+  std_error = es_results$se.egt
+) %>%
+  mutate(
+    ci_lower = estimate - 1.96 * std_error,
+    ci_upper = estimate + 1.96 * std_error,
+    model = "Callaway & Sant’Anna"
+  )
+
+# --- Get Sun & Abraham event study estimates ---
+sa_df <- broom::tidy(sa20, conf.int = TRUE) %>%
+  filter(grepl("event_time::", term)) %>%
+  mutate(
+    time = as.numeric(gsub("event_time::", "", term)),
+    estimate = estimate,
+    ci_lower = conf.low,
+    ci_upper = conf.high,
+    model = "Sun & Abraham"
+  ) %>%
+  select(time, estimate, std_error = std.error, ci_lower, ci_upper, model)
+
+# --- Combine for plotting ---
+combined_df <- bind_rows(cs_df, sa_df)
+
+# --- Plot ---
+ggplot(combined_df, aes(x = time, y = estimate, color = model)) +
+  geom_point(position = position_dodge(width = 0.3), size = 2) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper),
+                width = 0.5,
+                position = position_dodge(width = 0.3)) +
+  geom_vline(xintercept = -1, linetype = "dashed") +
+  geom_hline(yintercept = 0, linetype = "solid", color = "gray40") +
+  labs(
+    title = "Event Study Estimates: Callaway & Sant’Anna vs. Sun & Abraham",
+    x = "Time to Treatment",
+    y = "Estimate"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("Callaway & Sant’Anna" = "blue", "Sun & Abraham" = "darkred"))
+
+#### bayesian ----
 
 df_test <- merged_test %>%
   filter(G == 0 | G > 1950) %>%
