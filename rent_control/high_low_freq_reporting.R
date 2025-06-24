@@ -316,6 +316,16 @@ ggplot(merged_test, aes(x = years_full, y = log(total_units_reported+1), color =
   ) +
   theme_minimal()
 
+ggplot(merged_test, aes(x = log(population), y = log(total_units_reported), color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "log Population vs. log Total Units Reported (by Treatment)",
+    x = "log Population",
+    y = "log Total Housing Units Reported"
+  ) +
+  theme_minimal()
+
 
 # Treated do before an after treatment
 
@@ -327,15 +337,19 @@ ggplot(merged_test, aes(x = years_full, y = log(total_units_reported+1), color =
 
 
 
-ggplot(merged_test, aes(x = reporting_score, y = log(total_units_reported+1), color = treated)) +
+ggplot(merged_test %>% filter(G>0), aes(x = years_full, y = log(total_units_reported+1), color = treated)) +
   geom_point(alpha = 0.7) +
   geom_smooth(method = "lm", se = FALSE) +
+  facet_grid(reporting_category~post)+
   labs(
     title = "Fully Reported Years vs. Total Units Reported (by Treatment)",
     x = "Reporting score",
     y = "Total Housing Units Reported"
   ) +
   theme_minimal()
+
+summary(lm(log(total_units_reported+1)~treated*post*reporting_category,merged_test))
+summary(lm(log(total_units_reported + 1) ~ factor(event_time) * reporting_category, data = merged_test_fixest))
 
 ggplot(merged_test, aes(x = reporting_score, y = (years_full), color = treated)) +
   geom_point(alpha = 0.7) +
@@ -350,7 +364,7 @@ ggplot(merged_test, aes(x = reporting_score, y = (years_full), color = treated))
 ggplot(merged_test, aes(x = years_full, y = reporting_score, color = treated)) +
   geom_point(alpha = 0.7) +
   geom_smooth(method = "lm", se = FALSE) +
-  facet_wrap(~reporting_category)+
+  facet_wrap(~post)+
   labs(
     title = "Fully Reported Years vs. Total Units Reported (by Treatment)",
     x = "Years with Full (12-month) Reporting",

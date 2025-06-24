@@ -318,23 +318,26 @@ cs_data <- cs_data %>%
 #   "Byram township"
 # )
 #2000
+
+#### CS ----
 merged_test$ihs_mf_permits_per_1000 <- asinh(merged_test$mf_permits_per_1000)
 merged_test$log_population <- log(merged_test$population)
 hist(merged_test$population)
 # merged_test$mf_log_permits_per_1000
 att_gt_results <- att_gt(
-  yname = "mf_permits_per_1000",
+  yname = "ihs_mf_permits_per_1000",
   tname = "Year",
   idname = "id",
   gname = "G",
-  #xformla = ~ County_Name + MUN_TYPE+size_bin,
+  xformla = ~ County_Name + MUN_TYPE+size_bin,
   control_group = "notyettreated",
-  data = merged_test %>% filter(G>0),
-  #panel = T,
+  data = merged_test%>% filter(mixed_reporter==T),
+  panel = T,
   #allow_unbalanced_panel = T,
   est_method = "dr",
   anticipation = 1
 )
+
 #table(merged_test$G)
 es_results <- aggte(att_gt_results, type = "dynamic",na.rm = TRUE)
 summary(es_results)
@@ -360,6 +363,7 @@ ggdid(aggte(att_gt_results, type = "group"))
 ####Fixest ----
 library(fixest)
 merged_test_fixest <- merged_test %>%
+  filter(G >1950|G==0)%>%
   mutate(
     event_time = ifelse(G > 0, Year - G, NA))
 
@@ -471,8 +475,41 @@ df_plot %>%
   labs(title = "Estimated Dynamic Treatment Effect",
        x = "Event Time (years since treatment)", y = "Effect on Permits")
 
+#### gsynth ----
+merged_test$post <- ifelse(
+  merged_test$G > 0 & merged_test$Year >= merged_test$G,
+  1,
+  0
+)
 
+merged_test$post_anticipate1 <- ifelse(
+  !is.na(merged_test$G) & merged_test$Year >= (merged_test$G - 1),
+  1,
+  0
+)
 
+library(gsynth)
+#mixed_reporter
+gsynth_res <- gsynth(
+  ihs_mf_permits_per_1000 ~ post, 
+  data = merged_test %>% filter(mixed_reporter==T),
+  index = c("Place_Name_Clean", "Year"),
+  X = merged_test[, c("County_Name", "MUN_TYPE", "size_bin")],
+  force = "two-way",
+  se = TRUE, 
+  inference = "parametric", 
+  nboots = 1000,
+  min.T0 = 7,         # drop treated units with <7 pre-treatment years
+  parallel = TRUE
+)
+gsynth_res$att         # Dynamic treatment effects
+gsynth_res$att.avg     # Average treatment effect
+boot_att_avg <- gsynth_res$att.avg.boot
+
+# 95% confidence interval
+quantile(boot_att_avg, probs = c(0.025, 0.975))
+# Plot dynamic ATT
+plot(gsynth_res)
 
 #
 
