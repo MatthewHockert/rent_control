@@ -277,8 +277,12 @@ nj_all_updated <- nj_allx %>%
       TRUE ~ Place_Name_Clean)
     )%>%
   group_by(Place_Name_Clean, Year) %>%
-  summarise(across(where(is.numeric), ~ sum(.x, na.rm = TRUE)),
-            County_Name = first(County_Name),.groups = "drop")
+  summarise(
+    across(where(is.numeric) & !any_of("Months_Reported"), ~ sum(.x, na.rm = TRUE)),
+    Months_Reported = round(mean(Months_Reported, na.rm = TRUE)),
+    County_Name = first(County_Name),
+    .groups = "drop"
+  )
   
 
 nj_all_updated %>%
@@ -289,7 +293,7 @@ nj_all_updated %>%
 
 names(nj_all_updated)
 nj_all_updated <- nj_all_updated %>%
-  select(1:12, CBSA_Code,County_Name, multi_family, single_family)
+  select(1:12, CBSA_Code,County_Name, Months_Reported, multi_family, single_family)
 
 nj_all_updated <- nj_all_updated %>%
   group_by(Place_Name_Clean)%>%

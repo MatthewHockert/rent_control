@@ -46,6 +46,8 @@ con_stag_year <- con_stag %>%
     first_treatment_year = first(first_treatment_year),
     first_amendment_year = first(first_amendment_year),
     County_Name = first(County_Name),
+    County_Code = first(County_Code),
+    State_Code = first(State_Code),
     .groups = "drop"
   ) %>%
   group_by(Place_Name_Clean, Year) %>%
@@ -320,18 +322,21 @@ cs_data <- cs_data %>%
 #2000
 
 #### CS ----
+
+
 merged_test$ihs_mf_permits_per_1000 <- asinh(merged_test$mf_permits_per_1000)
 merged_test$log_population <- log(merged_test$population)
+expanded_control_data_dedup$log_permits <- asinh(expanded_control_data_dedup$multi_family_sum)
 hist(merged_test$population)
 # merged_test$mf_log_permits_per_1000
 att_gt_results <- att_gt(
-  yname = "ihs_mf_permits_per_1000",
+  yname = "log_permits",
   tname = "Year",
   idname = "id",
   gname = "G",
-  xformla = ~ County_Name + MUN_TYPE+size_bin,
+  xformla = ~ County_Code + State_Code,
   control_group = "notyettreated",
-  data = merged_test%>% filter(mixed_reporter==T),
+  data = expanded_control_data_dedup %>% filter(year > 1982 & (G > 1960 | G ==0) &months_reporting_pct>70),
   panel = T,
   #allow_unbalanced_panel = T,
   est_method = "dr",
@@ -476,11 +481,13 @@ df_plot %>%
        x = "Event Time (years since treatment)", y = "Effect on Permits")
 
 #### gsynth ----
-merged_test$post <- ifelse(
-  merged_test$G > 0 & merged_test$Year >= merged_test$G,
+expanded_control_data_dedup$post <- ifelse(
+  expanded_control_data_dedup$G > 0 & expanded_control_data_dedup$Year >= expanded_control_data_dedup$G,
   1,
   0
 )
+
+expanded_control_data_dedup$log_permits <- asinh(expanded_control_data_dedup$multi_family_sum)
 
 merged_test$post_anticipate1 <- ifelse(
   !is.na(merged_test$G) & merged_test$Year >= (merged_test$G - 1),
@@ -488,28 +495,48 @@ merged_test$post_anticipate1 <- ifelse(
   0
 )
 
+panelview(log_permits ~ post, data = expanded_control_data_dedup, 
+          index = c("id", "Year"), pre.post = TRUE, 
+          by.timing = TRUE)
+panelview(multi_family_sum ~ post, data = expanded_control_data_dedup%>% filter(year > 1982 & (G > 1960 | G ==0) &months_reporting_pct>80),  index = c("id","Year"), pre.post = TRUE) 
+panelview(log_permits ~ post, data = expanded_control_data_dedup%>% filter(year > 1982 & (G > 1960 | G ==0) &months_reporting_pct>90),
+          index = c("id","Year"), type = "outcome") 
+
 library(gsynth)
 #mixed_reporter
 gsynth_res <- gsynth(
-  ihs_mf_permits_per_1000 ~ post, 
-  data = merged_test %>% filter(mixed_reporter==T),
-  index = c("Place_Name_Clean", "Year"),
-  X = merged_test[, c("County_Name", "MUN_TYPE", "size_bin")],
+  (log_permits) ~ post, 
+  data = expanded_control_data_dedup %>% filter(year > 1982 & (G > 1960 | G ==0) &months_reporting_pct>80),
+  index = c("id", "Year"),
+  X = expanded_control_data_dedup[, c("County_Code", "State_Code")],
   force = "two-way",
   se = TRUE, 
   inference = "parametric", 
   nboots = 1000,
-  min.T0 = 7,         # drop treated units with <7 pre-treatment years
+  min.T0 = 7,         
   parallel = TRUE
 )
 gsynth_res$att         # Dynamic treatment effects
 gsynth_res$att.avg     # Average treatment effect
 boot_att_avg <- gsynth_res$att.avg.boot
-
+att_ci <- apply(gsynth_res$att.boot, 2, quantile, probs = c(0.025, 0.975))
+plot(gsynth_res, type = "loadings")
 # 95% confidence interval
 quantile(boot_att_avg, probs = c(0.025, 0.975))
 # Plot dynamic ATT
 plot(gsynth_res)
+plot(gsynth_res, type = "raw")             # default; raw outcomes per treated unit
+plot(gsynth_res, type = "counterfactual")  # treated vs counterfactual averages
+plot(gsynth_res, type = "gap")             # ATT over time (i.e., counterfactual - treated)
+
+gsynth_plot_practice <- expanded_control_data_dedup %>% filter(year > 1982 & (G > 1960 | G ==0) &months_reporting_pct>80)
+plot(gsynth_res, type = "counterfactual", id = "1591", main = "jersey city")
+
+#   filter(G >0)%>%
+#   pull(Place_Name_Clean)%>%
+#   unique()
+
+
 
 #
 

@@ -54,6 +54,8 @@ nj_data_list_month <- lapply(nj_data_list_month, function(df) {
 # Final bind and cleanup
 nj_all_month <- bind_rows(nj_data_list_month)
 beep()
+colSums(is.na(nj_all_month))
+
 
 
 # Optional fixes for character formatting
@@ -67,30 +69,43 @@ beep()
 nj_all_month <- filter(nj_all_month, State_Code == "34")
 colSums(is.na(nj_all_month))
 
+
 print(unique(nj_all_month$Survey_Date))
 
 parse_survey_date <- function(x) {
-  if (grepl("^\\d{4}$", x)) {
-    prefix <- substr(x, 1, 2)
-    if (as.numeric(prefix) >= 80 & as.numeric(prefix) <= 99) {
-      return(as.numeric(paste0("19", prefix)))
-    } else {
-      return(as.numeric(x))
-    }
+  if (nchar(x) == 6 && grepl("^\\d{6}$", x)) {
+    year <- as.numeric(substr(x, 1, 4))
+    month <- as.numeric(substr(x, 5, 6))
+  } else if (nchar(x) == 4 && grepl("^\\d{4}$", x)) {
+    year_prefix <- substr(x, 1, 2)
+    year <- ifelse(as.numeric(year_prefix) >= 80,
+                   as.numeric(paste0("19", year_prefix)),
+                   as.numeric(paste0("20", year_prefix)))
+    month <- as.numeric(substr(x, 3, 4))
   } else {
-    return(NA)
+    year <- NA
+    month <- NA
   }
+  return(list(year = year, month = month))
 }
 
-nj_all_month2 <- nj_all_month %>%
+parsed_dates <- lapply(nj_all_month$Survey_Date, parse_survey_date)
+parsed_df <- do.call(rbind, lapply(parsed_dates, function(x) data.frame(Year = x$year, Month = x$month)))
+nj_all_month2 <- bind_cols(nj_all_month, parsed_df)
+
+library(zoo)
+
+nj_all_month2 <- nj_all_month2 %>%
   mutate(
-    Year = sapply(Survey_Date, parse_survey_date)
+    ym = as.yearmon(paste(Year, Month), "%Y %m")
   )
-print(unique(nj_all_month2$Year))
+
+print(unique(nj_all_month2$ym))
+colSums(is.na(nj_all_month2))
+
 beep()
 
-print(unique(nj_all2$Place_Name))
-
+print(unique(nj_all_month2$Place_Name))
 
 
 clean_place_name <- function(x) {
@@ -111,18 +126,18 @@ clean_place_name <- function(x) {
   return(x)
 }
 
-nj_all_month <- nj_all_month %>%
+nj_all_month2 <- nj_all_month2 %>%
   mutate(
     Place_Name_Clean = clean_place_name(Place_Name)
   )
 
-nrow(nj_all_month)
-nj_allx_month <- merge(nj_all_month,nj_county_city_crosswalk,by="County_Code")
+nrow(nj_all_month2)
+nj_allx_month <- merge(nj_all_month2,nj_county_city_crosswalk,by="County_Code")
 nrow(nj_allx_month)
 
 
 monthly_trimmed <- nj_allx_month %>%
-  select(Survey_Date, State_Code, Place_Name_Clean, County_Code, County_Name,
+  select(Survey_Date, State_Code, Place_Name_Clean, County_Code, County_Name, Year, ym,
          X1_unit_Units, X2_units_Units, X3_4_units_Units, X5_units_Units)
 
 monthly_trimmed <- monthly_trimmed %>%
@@ -131,6 +146,20 @@ monthly_trimmed <- monthly_trimmed %>%
     two_units = X2_units_Units,
     three_four_units = X3_4_units_Units,
     mf_units = X5_units_Units
+  )
+
+monthly_trimmed <- monthly_trimmed %>% filter(!is.na(Date))
+monthly_trimmed <- monthly_trimmed %>%
+  mutate(
+    single_family = as.numeric(sf_units),
+    multi_family = rowSums(
+      cbind(
+        as.numeric(two_units),
+        as.numeric(three_four_units),
+        as.numeric(mf_units)
+      ),
+      na.rm = TRUE
+    )
   )
 
 monthly_trimmed <- monthly_trimmed %>%
@@ -189,51 +218,248 @@ nj_all_month_updated <- monthly_trimmed %>%
             County_Name = first(County_Name),.groups = "drop")
 
 
+#### year vs. monthly comparison ----
 
-monthly_reporting_summary <- nj_all_month_updated %>%
-  group_by(Place_Name_Clean, year) %>%
-  summarise(
-    County_Name = first(County_Name),
-    months_reported = sum(sf_units > 0 | two_units > 0 | three_four_units > 0 | mf_units > 0),
-    total_units = sum(sf_units + two_units + three_four_units + mf_units),
-    .groups = "drop"
-  )
+monthly_summary <- nj_all_month_updated  %>%
+  group_by(Place_Name_Clean,County_Name, Year)  %>%
+  summarise(monthly_total = sum(multi_family+single_family, na.rm = TRUE),
+            .groups = "drop")
 
-monthly_reporting_summary <- monthly_reporting_summary %>%
+nj_allx$annual_total <- rowSums(cbind(nj_allx$multi_family,nj_allx$single_family))
+
+quality_df <- nj_allx %>%
+  left_join(monthly_summary, by = c("Place_Name_Clean","County_Name", "Year"))
+
+quality_df <- quality_df %>%
   mutate(
-    reporting_type = case_when(
-      months_reported == 12 ~ "monthly_full",
-      months_reported >= 6  ~ "monthly_partial",
-      months_reported < 6 & months_reported > 0   ~ "monthly_sparse",
-      months_reported == 0  ~ "no_reporting"
+    quality_flag = case_when(
+      is.na(monthly_total) ~ "no_monthly_data",
+      abs(monthly_total - annual_total) < 5 ~ "full_match",
+      monthly_total < annual_total ~ "partial_reporting",
+      monthly_total > annual_total ~ "possible_error"
     )
   )
-months_reported %>%
-  group_by(Place_)
-length(unique(monthly_reporting_summary$months_reported))
 
-reporting_summary_by_place <- monthly_reporting_summary %>%
+table(quality_df$quality_flag)
+
+full_match<- quality_df %>%
+  filter(quality_flag== "full_match")
+  
+
+no_monthly_data <- quality_df %>%
+  filter(quality_flag== "no_monthly_data")
+
+possible_error <- quality_df %>%
+  filter(quality_flag== "possible_error")
+
+#### original analysis updated ----
+
+names(nj_all_updated)
+
+annual_reporting_pct <- nj_all_updated %>%
   group_by(Place_Name_Clean) %>%
   summarise(
     County_Name = first(County_Name),
-    years_total = n(),
-    years_full = sum(reporting_type == "monthly_full"),
-    years_partial = sum(reporting_type == "monthly_partial"),
-    years_sparse = sum(reporting_type == "monthly_sparse"),
-    years_none = sum(reporting_type == "no_reporting"),
-    total_units_reported = sum(total_units, na.rm = TRUE)
-  ) %>%
-  mutate(
-    consistent_reporter = years_full / years_total >= 0.75,
-    low_reporter = years_none / years_total >= 0.5
-  )%>%
-  mutate(
-    mixed_reporter = !consistent_reporter & !low_reporter,
-    reporting_score = ((1 * years_full + 0.66 * years_partial + 0.33 * years_sparse) / years_total)*100)
+    total_months_possible = n() * 12,
+    total_months_reported = sum(Months_Reported, na.rm = TRUE),
+    months_reporting_pct = 100 * total_months_reported / total_months_possible,
+    total_units_reported = sum(multi_family+single_family, na.rm = TRUE)
+  )
 
-table(reporting_summary_by_place$reporting_score)
+reporting_summary_by_place <- nj_all_updated %>%
+  left_join(annual_reporting_pct %>%
+              select(Place_Name_Clean, months_reporting_pct),
+            by = "Place_Name_Clean")
 
-##### Visuals ----
+
+# reporting_summary_by_place <- monthly_reporting_summary %>%
+#   group_by(Place_Name_Clean) %>%
+#   summarise(
+#     County_Name = first(County_Name),
+#     years_total = n(),
+#     years_full = sum(reporting_type == "monthly_full"),
+#     years_partial = sum(reporting_type == "monthly_partial"),
+#     years_sparse = sum(reporting_type == "monthly_sparse"),
+#     years_none = sum(reporting_type == "no_reporting"),
+#     total_units_reported = sum(total_units, na.rm = TRUE)
+#   ) %>%
+#   mutate(
+#     consistent_reporter = years_full / years_total >= 0.75,
+#     low_reporter = years_none / years_total >= 0.5
+#   )%>%
+#   mutate(
+#     mixed_reporter = !consistent_reporter & !low_reporter,
+#     reporting_score = ((1 * years_full + 0.66 * years_partial + 0.33 * years_sparse) / years_total)*100)
+# 
+# table(reporting_summary_by_place$reporting_score)
+
+
+##### visuals updated ----
+
+
+
+ggplot(annual_reporting_pct, aes(x = months_reporting_pct)) +
+  geom_histogram(binwidth = 5, color = "black", fill = "steelblue") +
+  geom_vline(xintercept = 80, linetype = "dashed", color = "red")+
+  # facet_wrap(~ County_Name)+
+  labs(
+    title = "Distribution of Monthly Reporting Percentage",
+    x = "Monthly Reporting % (All Years)",
+    y = "Number of Places"
+  )
+
+
+##### updated annual + monthly merge ----
+
+merged_test <- merge(cs_data,annual_reporting_pct,by=c("Place_Name_Clean","County_Name"))
+merged_test$treated <- ifelse(merged_test$G > 0,"treated","control")
+merged_test$post <- factor(
+  ifelse(merged_test$G > merged_test$Year, "post-treatment", "pre-treatment"),
+  levels = c("pre-treatment", "post-treatment")
+)
+
+merged_test <- merged_test %>% 
+  mutate(reporting_category = case_when(
+    consistent_reporter ~ "Consistent Reporter",
+    low_reporter ~ "Low Reporter",
+    TRUE ~ "Mixed Reporter"
+  ))
+
+reporting_summary_long <- merged_test %>%
+  pivot_longer(
+    cols = c(years_full, years_partial, years_sparse, years_none),
+    names_to = "reporting_type",
+    values_to = "count"
+  )
+
+ggplot(reporting_summary_long, aes(x = count, fill = treated)) +
+  geom_histogram(aes(y = after_stat(density)),position = "identity", alpha = 0.5, bins = 40,binwidth = 1) +
+  facet_wrap(~ reporting_type, scales = "free_y") +
+  labs(
+    title = "Distribution of Reporting Years by Type (Treated vs. Control)",
+    x = "Number of Years",
+    y = "Number of Cities"
+  ) +
+  theme_minimal()
+
+ggplot(merged_test, aes(x = years_full, y = log(total_units_reported+1), color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Fully Reported Years vs. Total Units Reported (by Treatment)",
+    x = "Years with Full (12-month) Reporting",
+    y = "Total Housing Units Reported"
+  ) +
+  theme_minimal()
+
+ggplot(merged_test, aes(x = log(population), y = log(total_units_reported), color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~post)+
+  labs(
+    title = "log Population vs. log Total Units Reported (by Treatment)",
+    x = "log Population",
+    y = "log Total Housing Units Reported"
+  ) +
+  theme_minimal()
+
+ggplot(merged_test, aes(x = (population), y = months_reporting_pct, color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~post)+
+  labs(
+    title = "log Population vs. log Total Units Reported (by Treatment)",
+    x = "log Population",
+    y = "log Total Housing Units Reported"
+  ) +
+  theme_minimal()
+
+treatment_units <- merged_test %>%
+  filter(G > 0) %>%
+  distinct(id, population)
+
+min(treatment_units$population, na.rm = TRUE)
+
+# Treated do before an after treatment
+
+
+
+
+
+
+
+
+
+ggplot(merged_test %>% filter(G>0), aes(x = years_full, y = log(total_units_reported+1), color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_grid(reporting_category~post)+
+  labs(
+    title = "Fully Reported Years vs. Total Units Reported (by Treatment)",
+    x = "Reporting score",
+    y = "Total Housing Units Reported"
+  ) +
+  theme_minimal()
+
+summary(lm(log(total_units_reported+1)~treated*post,merged_test))
+summary(lm(log(total_units_reported + 1) ~ factor(event_time) * reporting_category, data = merged_test_fixest))
+
+ggplot(merged_test, aes(x = reporting_score, y = (years_full), color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Fully Reported Years vs. years fully reported",
+    x = "Reporting score",
+    y = "years fully reported"
+  ) +
+  theme_minimal()
+
+ggplot(merged_test, aes(x = years_full, y = reporting_score, color = treated)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~post)+
+  labs(
+    title = "Fully Reported Years vs. Total Units Reported (by Treatment)",
+    x = "Years with Full (12-month) Reporting",
+    y = "Total Housing Units Reported"
+  ) +
+  theme_minimal()
+
+ggplot(merged_test, aes(x = reporting_category, fill = treated)) +
+  geom_bar(position = "dodge") +
+  labs(
+    title = "Number of Cities by Reporting Category and Treatment",
+    x = "Reporting Category",
+    y = "Count of Cities"
+  ) +
+  theme_minimal()
+
+
+summary(lm(log(total_units_reported+1) ~ treated*reporting_score + factor(Year),merged_test))
+summary(lm(sf_log_permits_per_1000 ~ treated*reporting_category, data = merged_test))
+
+
+reporting_treatment_table <- merged_test %>%
+  distinct(Place_Name_Clean, treated, reporting_category) %>%
+  count(treated, reporting_category)%>%
+  arrange(reporting_category)
+
+# Print the table
+print(reporting_treatment_table)
+
+merged_test %>%
+  filter(reporting_category == "Consistent Reporter") %>%
+  distinct(Place_Name_Clean, treated) %>%
+  arrange(treated,Place_Name_Clean)
+
+
+
+
+
+
+
+
+#### Visuals ----
 reporting_summary_long <- reporting_summary_by_place %>%
   pivot_longer(cols = starts_with("years_"), 
                names_to = "reporting_type", 
@@ -348,7 +574,7 @@ ggplot(merged_test %>% filter(G>0), aes(x = years_full, y = log(total_units_repo
   ) +
   theme_minimal()
 
-summary(lm(log(total_units_reported+1)~treated*post*reporting_category,merged_test))
+summary(lm(log(total_units_reported+1)~treated*post,merged_test))
 summary(lm(log(total_units_reported + 1) ~ factor(event_time) * reporting_category, data = merged_test_fixest))
 
 ggplot(merged_test, aes(x = reporting_score, y = (years_full), color = treated)) +
