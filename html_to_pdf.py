@@ -15,6 +15,9 @@ for city_folder in os.listdir(root_folder):
         base_name = os.path.splitext(os.path.basename(html_file))[0]
         pdf_file = os.path.join(city_path, f"{base_name}.pdf")
 
+        if os.path.exists(pdf_file):
+            continue
+
         subprocess.run([
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             "--headless",

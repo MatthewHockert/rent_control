@@ -40,7 +40,7 @@ for filename in os.listdir(parsed_folder):
 
     base_page_id_match = re.search(r"_(\d+)\.csv$", filename)
     if not base_page_id_match:
-        print(f"❌ Skipping file with no numeric ID: {filename}")
+        print(f"Skipping file with no numeric ID: {filename}")
         continue
 
     base_page_id = base_page_id_match.group(1)
@@ -55,6 +55,11 @@ for filename in os.listdir(parsed_folder):
 
     city = rows[0]["city"].replace(" ", "_").lower()
     output_folder = os.path.join(output_root, city)
+
+    if os.path.exists(output_folder) and os.listdir(output_folder):
+        print(f"Skipping {city}, already exists in output.")
+        continue
+
     os.makedirs(output_folder, exist_ok=True)
 
     for idx, row in enumerate(rows, start=1):

@@ -14,6 +14,10 @@ for filename in os.listdir(input_dir):
     pdf_path = os.path.join(input_dir, filename)
     output_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}.csv")
 
+    if os.path.exists(output_path):
+        print(f"Skipping {filename} — already parsed.")
+        continue
+
     version_date_pairs = []
     archive_id = None
     city = "UNKNOWN"
